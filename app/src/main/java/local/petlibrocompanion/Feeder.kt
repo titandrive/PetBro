@@ -39,6 +39,14 @@ object Feeder {
     private val _feeding = MutableStateFlow(false)
     val feeding: StateFlow<Boolean> = _feeding
 
+    /** A background check of the devices is going (the page shows what was saved meanwhile). */
+    private val _refreshing = MutableStateFlow(false)
+    val refreshing: StateFlow<Boolean> = _refreshing
+
+    /** Why the last background check failed, while the saved devices are still shown. */
+    private val _stale = MutableStateFlow<String?>(null)
+    val stale: StateFlow<String?> = _stale
+
     private var started = false
 
     /** Restores a saved sign-in once per process. */
@@ -46,7 +54,10 @@ object Feeder {
         if (started) return
         started = true
         FeedLog.init(context)
-        if (Session.hasToken(context)) refresh(context.applicationContext)
+        if (!Session.hasToken(context)) return
+        // Show the devices saved last time straight away, then check them in the background.
+        Session.devices(context)?.let { setDevices(context, it, save = false) }
+        refresh(context.applicationContext)
     }
 
     /** True when Feed Now can go: signed in with a feeder picked. */
@@ -73,17 +84,29 @@ object Feeder {
         }
     }
 
-    /** Re-reads the account's devices with the saved session. */
+    /**
+     * Re-reads the account's devices with the saved session. With devices already on screen it
+     * checks quietly, leaving them up; otherwise the page says it's checking.
+     */
     fun refresh(context: Context) {
         val app = context.applicationContext
-        _account.value = AccountState.Checking("Checking Petlibro…")
+        if (_refreshing.value) return
+        val quiet = _account.value is AccountState.SignedIn
+        if (!quiet) _account.value = AccountState.Checking("Checking Petlibro…")
+        _refreshing.value = true
         scope.launch {
+            try { check(app, quiet) } finally { _refreshing.value = false }
+        }
+    }
+
+    private suspend fun check(app: Context, quiet: Boolean) {
+        run {
             val token = Session.token(app)
             if (token == null) {
                 Session.clear(app)
                 _account.value = AccountState.SignedOut
                 _error.value = "The saved sign-in couldn't be restored. Sign in again."
-                return@launch
+                return@run
             }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
@@ -99,6 +122,8 @@ object Feeder {
                 if (it is SessionExpired) {
                     signOut(app)
                     _error.value = message(it)
+                } else if (quiet) {
+                    _stale.value = message(it)
                 } else {
                     _account.value = AccountState.Offline(Session.email(app), message(it))
                 }
@@ -106,7 +131,11 @@ object Feeder {
         }
     }
 
-    private fun setDevices(context: Context, devices: List<Device>) {
+    private fun setDevices(context: Context, devices: List<Device>, save: Boolean = true) {
+        if (save) {
+            Session.saveDevices(context, devices)
+            _stale.value = null
+        }
         val feeders = devices.filter { it.canFeed }
         // Keep the feeder picked before, if it's still on the account; else the only one there is.
         val saved = Session.feeder(context)

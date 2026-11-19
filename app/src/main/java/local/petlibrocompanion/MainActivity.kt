@@ -21,6 +21,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -456,11 +457,16 @@ private fun FeederCard(a: AccountState.SignedIn) {
         LucidePawPrint,
         palette.warning,
         action = {
-            IconButton(onClick = { Haptics.tick(context); Feeder.refresh(context) }) {
-                Icon(LucideRefreshCw, contentDescription = "Refresh devices", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+            // Spins while the saved devices are being checked in the background.
+            val refreshing by Feeder.refreshing.collectAsStateWithLifecycle()
+            IconButton(onClick = { Haptics.tick(context); Feeder.refresh(context) }, enabled = !refreshing) {
+                if (refreshing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else Icon(LucideRefreshCw, contentDescription = "Refresh devices", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
             }
         },
     ) {
+        val stale by Feeder.stale.collectAsStateWithLifecycle()
+        stale?.let { Notice("Showing saved devices. $it", MaterialTheme.colorScheme.error) }
         when {
             feeders.isEmpty() -> {
                 Notice("No ${Device.FEEDER_MODEL} feeder on this account. Share the feeder with it in the Petlibro app.", palette.warning)
@@ -491,7 +497,9 @@ private fun DeviceRow(device: Device, picked: Boolean, onPick: (() -> Unit)?) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
-            .background(if (picked) palette.warning.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceContainerHigh)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            // With several feeders to pick from, the picked one is outlined in the accent.
+            .then(if (picked && onPick != null) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, MaterialTheme.shapes.medium) else Modifier)
             .then(if (onPick != null) Modifier.selectable(picked, role = Role.RadioButton) { Haptics.tick(context); onPick() } else Modifier)
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {

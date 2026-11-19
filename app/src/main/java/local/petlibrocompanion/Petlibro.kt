@@ -169,6 +169,19 @@ object Session {
 
     fun clear(context: Context) = prefs(context).edit().clear().apply()
 
+    /** The account's devices as last read, so the app can show them before Petlibro answers. */
+    fun saveDevices(context: Context, devices: List<Device>) {
+        val list = JSONArray(devices.map { JSONObject().put("serial", it.serial).put("name", it.name).put("model", it.model) })
+        prefs(context).edit().putString("devices", list.toString()).apply()
+    }
+
+    fun devices(context: Context): List<Device>? = runCatching {
+        val list = JSONArray(prefs(context).getString("devices", null) ?: return null)
+        (0 until list.length()).map { i ->
+            list.getJSONObject(i).let { Device(it.getString("serial"), it.getString("name"), it.getString("model")) }
+        }
+    }.getOrNull()
+
     fun encrypt(text: String): Pair<String, String> {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key())
