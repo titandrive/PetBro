@@ -242,8 +242,10 @@ object FeedNotifications {
             Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE,
         )
-        val title = (entry.meal ?: "Meal") + if (entry.ok) " served" else " not confirmed"
-        val text = "${portionsLabel(entry.portions)}. ${entry.message}"
+        // Served: just what went out. Failed: an error saying why.
+        val meal = entry.meal ?: "Meal"
+        val title = if (entry.ok) "$meal served" else "$meal didn't go out"
+        val text = if (entry.ok) portionsLabel(entry.portions) else entry.message
         val notification = android.app.Notification.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_logo)
             .setContentTitle(title)
