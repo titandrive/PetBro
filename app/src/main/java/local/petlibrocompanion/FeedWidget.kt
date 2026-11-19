@@ -214,9 +214,9 @@ class FeedWidget : AppWidgetProvider() {
             fun stats(): String {
                 val fed = FeedLog.todayFed(context)
                 val lines = mutableListOf("Today: " + if (fed.isEmpty()) "no feeds" else "${fed.size}× · ${fed.sumOf { it.portions }} portions")
-                Session.today(context)?.eatingTimes?.takeIf { it >= 0 }?.let { n ->
+                Session.today(context)?.takeIf { it.eatingTimes >= 0 }?.let { t ->
                     val pet = Session.pets(context).singleOrNull() ?: "Pet"
-                    lines += "$pet ate ${if (n == 1) "once" else "$n times"}"
+                    lines += "$pet ate ${t.ateLabel()}"
                 }
                 val next = if (Meals.scheduleOn(context)) Meals.nextDue(Meals.load(context)) else null
                 lines += if (next == null) "No meals scheduled" else "Next: " + next.first.toLocalTime().format(Clock.format) +

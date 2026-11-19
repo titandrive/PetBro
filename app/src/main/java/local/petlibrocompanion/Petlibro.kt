@@ -34,8 +34,20 @@ data class Device(val serial: String, val name: String, val model: String) {
 }
 
 /** Today's feeder numbers, for [day] (ISO date); -1 where Petlibro didn't say. */
-data class TodayStats(val day: String, val eatingTimes: Int, val feedingTimes: Int, val feedingPortions: Int) {
+data class TodayStats(val day: String, val eatingTimes: Int, val feedingTimes: Int, val feedingPortions: Int, val eatingSeconds: Int = -1) {
     val isToday: Boolean get() = day == java.time.LocalDate.now().toString()
+
+    /** "7 times · 14 min", or just the count when Petlibro gave no time. */
+    fun ateLabel(): String {
+        val times = if (eatingTimes == 1) "once" else "$eatingTimes times"
+        val time = when {
+            eatingSeconds < 0 -> null
+            eatingSeconds < 60 -> "$eatingSeconds sec"
+            eatingSeconds < 3600 -> "${(eatingSeconds + 30) / 60} min"
+            else -> "${eatingSeconds / 3600} h ${(eatingSeconds % 3600) / 60} min"
+        }
+        return if (time != null) "$times · $time" else times
+    }
 }
 
 /** Petlibro's US cloud API: the same calls its Android app makes. */
@@ -95,6 +107,8 @@ object Petlibro {
             eatingTimes = d.optInt("todayEatingTimes", -1),
             feedingTimes = d.optInt("todayFeedingTimes", -1),
             feedingPortions = d.optInt("todayFeedingQuantity", -1),
+            // Today's total time at the bowl; the Home Assistant integration reads it as seconds.
+            eatingSeconds = d.optInt("petEatingTime", -1),
         )
     }
 
@@ -211,13 +225,14 @@ object Session {
 
     fun saveToday(context: Context, t: TodayStats) = prefs(context).edit()
         .putString("todayDay", t.day).putInt("todayEating", t.eatingTimes)
-        .putInt("todayFeeds", t.feedingTimes).putInt("todayPortions", t.feedingPortions).apply()
+        .putInt("todayFeeds", t.feedingTimes).putInt("todayPortions", t.feedingPortions)
+        .putInt("todayEatingSeconds", t.eatingSeconds).apply()
 
     /** Today's feeder numbers as last read, or null if none were read today. */
     fun today(context: Context): TodayStats? {
         val p = prefs(context)
         val day = p.getString("todayDay", null) ?: return null
-        return TodayStats(day, p.getInt("todayEating", -1), p.getInt("todayFeeds", -1), p.getInt("todayPortions", -1)).takeIf { it.isToday }
+        return TodayStats(day, p.getInt("todayEating", -1), p.getInt("todayFeeds", -1), p.getInt("todayPortions", -1), p.getInt("todayEatingSeconds", -1)).takeIf { it.isToday }
     }
 
     /** The account's devices as last read, so the app can show them before Petlibro answers. */

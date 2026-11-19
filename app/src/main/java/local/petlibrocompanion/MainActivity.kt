@@ -358,13 +358,19 @@ private fun FeedSheet(onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun ScreenColumn(title: String, header: (@Composable () -> Unit)? = null, content: @Composable () -> Unit) {
+private fun ScreenColumn(
+    title: String,
+    header: (@Composable () -> Unit)? = null,
+    /** Room between cards; the home page runs tighter so it fits on one screen. */
+    gap: androidx.compose.ui.unit.Dp = 16.dp,
+    content: @Composable () -> Unit,
+) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = { Header(title, action = header) },
     ) { padding ->
         GapColumn(
-            16.dp,
+            gap,
             modifier = Modifier
                 .padding(padding)
                 .imePadding()
@@ -372,7 +378,7 @@ private fun ScreenColumn(title: String, header: (@Composable () -> Unit)? = null
                 .padding(horizontal = 16.dp, vertical = 4.dp),
         ) {
             content()
-            Spacer(Modifier.height(8.dp))
+            if (gap >= 16.dp) Spacer(Modifier.height(8.dp))
         }
     }
 }
@@ -384,7 +390,7 @@ private fun HomeScreen(onOpenSchedule: () -> Unit, onOpenLog: () -> Unit) {
     val context = LocalContext.current
     val palette = LocalPalette.current
     val account by Feeder.account.collectAsStateWithLifecycle()
-    ScreenColumn("PetBro") {
+    ScreenColumn("PetBro", gap = 12.dp) {
         when (val a = account) {
             AccountState.SignedOut -> SignInCard()
             is AccountState.Checking -> SectionCard("Petlibro", LucideRouter, palette.secondary) {
@@ -506,14 +512,7 @@ private fun DeviceRow(device: Device, picked: Boolean, onPick: (() -> Unit)?) {
     ) {
         Column(Modifier.weight(1f)) {
             Text(device.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            // Under the picked feeder, how often the pet ate today (counted by the feeder from
-            // its RFID tag); the model otherwise.
-            val today by Feeder.today.collectAsStateWithLifecycle()
-            val pets by Feeder.pets.collectAsStateWithLifecycle()
-            val ate = today?.takeIf { picked && it.isToday && it.eatingTimes >= 0 }?.let {
-                "${pets.singleOrNull() ?: "Your pet"} ate " + if (it.eatingTimes == 1) "once today" else "${it.eatingTimes} times today"
-            }
-            Text(ate ?: device.model, style = MaterialTheme.typography.bodySmall, color = noteColor)
+            Text(device.model, style = MaterialTheme.typography.bodySmall, color = noteColor)
         }
         if (picked) Pill("Ready", palette.success)
     }
@@ -538,6 +537,12 @@ private fun TodayCard(onOpenSchedule: () -> Unit, onOpenLog: () -> Unit) {
             onClick = onOpenSchedule,
         )
         val last = log.firstOrNull()
+        // Counted by the feeder from the pet's RFID tag: visits and time at the bowl, not when.
+        val today by Feeder.today.collectAsStateWithLifecycle()
+        val pets by Feeder.pets.collectAsStateWithLifecycle()
+        today?.takeIf { it.isToday && it.eatingTimes >= 0 }?.let { t ->
+            InfoRow("${pets.singleOrNull() ?: "Your pet"} ate today", t.ateLabel().replaceFirstChar { it.uppercase() }, onClick = onOpenLog)
+        }
         InfoRow(
             "Last feed",
             last?.let { "${portionsLabel(it.portions)} · ${whenLabel(it.time)}" + if (it.ok) "" else " (not confirmed)" } ?: "None yet",
@@ -549,16 +554,16 @@ private fun TodayCard(onOpenSchedule: () -> Unit, onOpenLog: () -> Unit) {
 @Composable
 private fun InfoRow(label: String, value: String, onClick: () -> Unit) {
     val context = LocalContext.current
+    // The label above its value, kept tight so three rows fit without the page scrolling.
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.small)
-            .clickable { Haptics.tick(context); onClick() }
-            .padding(vertical = 4.dp),
+            .clickable { Haptics.tick(context); onClick() },
     ) {
         Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(value, style = MaterialTheme.typography.bodyLarge)
         }
         Icon(LucideChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
