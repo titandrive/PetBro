@@ -65,6 +65,30 @@
             </intent-filter>
         </service>
 
+        <!-- The home-screen widget, its tap, and its settings page (opened when placed). -->
+        <receiver
+            android:name=".FeedWidget"
+            android:exported="true"
+            android:label="Feed now">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/feed_widget_info" />
+        </receiver>
+        <receiver android:name=".FeedWidgetReceiver" android:exported="false" />
+        <activity
+            android:name=".FeedWidgetConfigure"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="Widget">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
         <!-- The meal alarm, and resetting it after a reboot or clock change. -->
         <receiver android:name=".MealReceiver" android:exported="false">
             <intent-filter>

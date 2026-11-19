@@ -43,6 +43,14 @@ object Feeder {
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing
 
+    private val _pets = MutableStateFlow<List<String>>(emptyList())
+    /** The names of the pets bound to the feeder, as last read. */
+    val pets: StateFlow<List<String>> = _pets
+
+    private val _today = MutableStateFlow<TodayStats?>(null)
+    /** Today's numbers from the feeder (times the pet ate, meals out), as last read. */
+    val today: StateFlow<TodayStats?> = _today
+
     /** Why the last background check failed, while the saved devices are still shown. */
     private val _stale = MutableStateFlow<String?>(null)
     val stale: StateFlow<String?> = _stale
@@ -54,6 +62,8 @@ object Feeder {
         if (started) return
         started = true
         FeedLog.init(context)
+        _today.value = Session.today(context)
+        _pets.value = Session.pets(context)
         if (!Session.hasToken(context)) return
         // Show the devices saved last time straight away, then check them in the background.
         Session.devices(context)?.let { setDevices(context, it, save = false) }
@@ -118,7 +128,10 @@ object Feeder {
                     devices
                 }
             }
-            result.onSuccess { setDevices(app, it) }.onFailure {
+            result.onSuccess {
+                setDevices(app, it)
+                refreshToday(app)
+            }.onFailure {
                 if (it is SessionExpired) {
                     signOut(app)
                     _error.value = message(it)
@@ -128,6 +141,31 @@ object Feeder {
                     _account.value = AccountState.Offline(Session.email(app), message(it))
                 }
             }
+        }
+    }
+
+    /** Re-reads today's feeder numbers in the background; failures keep the last ones. */
+    fun refreshToday(context: Context) {
+        val app = context.applicationContext
+        scope.launch {
+            val t = withContext(Dispatchers.IO) { readToday(app) } ?: return@launch
+            _today.value = t
+            FeedWidget.updateAll(app)
+        }
+    }
+
+    /** Blocking: reads and saves today's feeder numbers, or null if they couldn't be read. */
+    fun readToday(context: Context): TodayStats? {
+        val token = Session.token(context) ?: return null
+        val serial = Session.feeder(context) ?: return null
+        // The pets' names rarely change, but they're one small request: read them alongside.
+        runCatching { Petlibro.pets(token, serial) }.getOrNull()?.let {
+            Session.savePets(context, it)
+            _pets.value = it
+        }
+        return runCatching { Petlibro.today(token, serial) }.getOrNull()?.also {
+            Session.saveToday(context, it)
+            _today.value = it
         }
     }
 
@@ -249,12 +287,23 @@ object FeedLog {
         val all = (listOf(entry) + load(context)).take(LIMIT)
         prefs(context).edit().putString("entries", JSONArray(all.map { it.toJson() }).toString()).commit()
         _entries.value = all
+        FeedWidget.updateAll(context)
         return entry
     }
 
     fun clear(context: Context) {
         prefs(context).edit().clear().apply()
         _entries.value = emptyList()
+        FeedWidget.updateAll(context)
+    }
+
+    /** The last feed that went out, read fresh (the widget runs without the app). */
+    fun lastFed(context: Context): FeedEntry? = load(context).firstOrNull { it.ok }
+
+    /** Today's feeds that went out, read fresh. */
+    fun todayFed(context: Context): List<FeedEntry> {
+        val start = java.time.LocalDate.now().atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        return load(context).filter { it.ok && it.time >= start }
     }
 }
 

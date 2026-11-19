@@ -120,12 +120,14 @@ object Meals {
         prefs(context).edit().putString("list", JSONArray(meals.map { it.toJson() }).toString()).commit()
         _meals.value = meals
         MealScheduler.reschedule(context)
+        FeedWidget.updateAll(context)
     }
 
     fun setEnabled(context: Context, on: Boolean) {
         prefs(context).edit().putBoolean("enabled", on).commit()
         _enabled.value = on
         MealScheduler.reschedule(context)
+        FeedWidget.updateAll(context)
     }
 
     /** The first PetBro had one daily meal in "daily-feed": it becomes the first meal here. */

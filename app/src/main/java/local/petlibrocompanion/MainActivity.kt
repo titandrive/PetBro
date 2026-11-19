@@ -72,6 +72,7 @@ class MainActivity : ComponentActivity() {
         Meals.init(this)
         Feeder.init(this)
         Clock.load(this)
+        WidgetPrefs.load(this)
         MealScheduler.reschedule(this)
         FeedNow.publishShortcut(this)
         setContent {
@@ -505,7 +506,14 @@ private fun DeviceRow(device: Device, picked: Boolean, onPick: (() -> Unit)?) {
     ) {
         Column(Modifier.weight(1f)) {
             Text(device.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(device.model, style = MaterialTheme.typography.bodySmall, color = noteColor)
+            // Under the picked feeder, how often the pet ate today (counted by the feeder from
+            // its RFID tag); the model otherwise.
+            val today by Feeder.today.collectAsStateWithLifecycle()
+            val pets by Feeder.pets.collectAsStateWithLifecycle()
+            val ate = today?.takeIf { picked && it.isToday && it.eatingTimes >= 0 }?.let {
+                "${pets.singleOrNull() ?: "Your pet"} ate " + if (it.eatingTimes == 1) "once today" else "${it.eatingTimes} times today"
+            }
+            Text(ate ?: device.model, style = MaterialTheme.typography.bodySmall, color = noteColor)
         }
         if (picked) Pill("Ready", palette.success)
     }
@@ -906,6 +914,8 @@ private fun SettingsScreen() {
                 )
                 PortionStepper(quick) { Prefs.setQuickPortions(context, it) }
             }
+
+            WidgetLookCard()
 
             val automationOn by Prefs.automation.collectAsStateWithLifecycle()
             SectionCard("Automation", LucideZap, palette.secondary) {

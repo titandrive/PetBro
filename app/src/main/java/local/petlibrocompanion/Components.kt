@@ -618,6 +618,14 @@ fun AppearanceSection() {
         }
     }
     Text("Theme", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
+    ThemePicker(family) { ThemeStore.setFamily(context, it) }
+}
+
+/** The current theme as a row; tapping it opens a sheet of every theme, each applied on tap. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ThemePicker(family: ThemeFamily, onPick: (ThemeFamily) -> Unit) {
+    val context = LocalContext.current
     var picking by rememberSaveable { mutableStateOf(false) }
     ThemeOption(family) { picking = true }
     if (picking) {
@@ -645,7 +653,7 @@ fun AppearanceSection() {
                         row.forEach { f ->
                             ThemeTile(f, selected = f == family, modifier = Modifier.weight(1f)) {
                                 Haptics.tick(context)
-                                if (f != family) ThemeStore.setFamily(context, f)
+                                if (f != family) onPick(f)
                             }
                         }
                         repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }

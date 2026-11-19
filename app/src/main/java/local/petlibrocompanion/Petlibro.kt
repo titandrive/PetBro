@@ -33,6 +33,11 @@ data class Device(val serial: String, val name: String, val model: String) {
     }
 }
 
+/** Today's feeder numbers, for [day] (ISO date); -1 where Petlibro didn't say. */
+data class TodayStats(val day: String, val eatingTimes: Int, val feedingTimes: Int, val feedingPortions: Int) {
+    val isToday: Boolean get() = day == java.time.LocalDate.now().toString()
+}
+
 /** Petlibro's US cloud API: the same calls its Android app makes. */
 object Petlibro {
     const val MAX_PORTIONS = 48
@@ -76,6 +81,34 @@ object Petlibro {
         return listOf("email", "nickname", "nickName")
             .map { info.optString(it) }
             .firstOrNull { it.isNotBlank() && it != "null" }
+    }
+
+    /**
+     * Today's numbers from the feeder: how many times the pet ate (the RFID feeder counts each
+     * visit) and how many meals went out. Petlibro gives counts, not the time of the last visit.
+     */
+    fun today(token: String, serial: String): TodayStats {
+        val d = request("/device/data/grainStatus", JSONObject().put("id", serial).put("deviceSn", serial), token) as? JSONObject
+            ?: throw IOException("Petlibro returned no feeder stats.")
+        return TodayStats(
+            day = java.time.LocalDate.now().toString(),
+            eatingTimes = d.optInt("todayEatingTimes", -1),
+            feedingTimes = d.optInt("todayFeedingTimes", -1),
+            feedingPortions = d.optInt("todayFeedingQuantity", -1),
+        )
+    }
+
+    /**
+     * Names of the pets bound to the feeder (its RFID tags). The integration this is taken from
+     * doesn't name the field, so the likely ones are tried in turn.
+     */
+    fun pets(token: String, serial: String): List<String> {
+        val list = request("/device/devicePetRelation/getBoundPets", JSONObject().put("deviceSn", serial), token) as? JSONArray
+            ?: return emptyList()
+        return (0 until list.length()).mapNotNull { i ->
+            val pet = list.optJSONObject(i) ?: return@mapNotNull null
+            listOf("name", "petName", "nickname", "nickName").map { pet.optString(it) }.firstOrNull { it.isNotBlank() && it != "null" }
+        }
     }
 
     fun feed(token: String, serial: String, portions: Int, requestId: String = UUID.randomUUID().toString()) {
@@ -168,6 +201,24 @@ object Session {
     fun setFeeder(context: Context, serial: String?) = prefs(context).edit().putString("feeder", serial).apply()
 
     fun clear(context: Context) = prefs(context).edit().clear().apply()
+
+    fun savePets(context: Context, names: List<String>) = prefs(context).edit().putString("pets", JSONArray(names).toString()).apply()
+
+    fun pets(context: Context): List<String> = runCatching {
+        val a = JSONArray(prefs(context).getString("pets", "[]"))
+        (0 until a.length()).map { a.getString(it) }
+    }.getOrDefault(emptyList())
+
+    fun saveToday(context: Context, t: TodayStats) = prefs(context).edit()
+        .putString("todayDay", t.day).putInt("todayEating", t.eatingTimes)
+        .putInt("todayFeeds", t.feedingTimes).putInt("todayPortions", t.feedingPortions).apply()
+
+    /** Today's feeder numbers as last read, or null if none were read today. */
+    fun today(context: Context): TodayStats? {
+        val p = prefs(context)
+        val day = p.getString("todayDay", null) ?: return null
+        return TodayStats(day, p.getInt("todayEating", -1), p.getInt("todayFeeds", -1), p.getInt("todayPortions", -1)).takeIf { it.isToday }
+    }
 
     /** The account's devices as last read, so the app can show them before Petlibro answers. */
     fun saveDevices(context: Context, devices: List<Device>) {
