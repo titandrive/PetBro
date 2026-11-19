@@ -85,7 +85,16 @@ object Feeder {
                 _error.value = "The saved sign-in couldn't be restored. Sign in again."
                 return@launch
             }
-            val result = withContext(Dispatchers.IO) { runCatching { Petlibro.devices(token) } }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val devices = Petlibro.devices(token)
+                    // Sign-ins from the first PetBro didn't save the email: ask Petlibro for it.
+                    if (Session.email(app) == null) {
+                        runCatching { Petlibro.accountName(token) }.getOrNull()?.let { Session.setEmail(app, it) }
+                    }
+                    devices
+                }
+            }
             result.onSuccess { setDevices(app, it) }.onFailure {
                 if (it is SessionExpired) {
                     signOut(app)

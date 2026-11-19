@@ -70,6 +70,14 @@ object Petlibro {
         }
     }
 
+    /** The account's email (or nickname, if it has no email), for showing who's signed in. */
+    fun accountName(token: String): String? {
+        val info = request("/member/member/info", JSONObject(), token) as? JSONObject ?: return null
+        return listOf("email", "nickname", "nickName")
+            .map { info.optString(it) }
+            .firstOrNull { it.isNotBlank() && it != "null" }
+    }
+
     fun feed(token: String, serial: String, portions: Int, requestId: String = UUID.randomUUID().toString()) {
         require(serial.isNotEmpty() && portions in 1..MAX_PORTIONS) { "Invalid feeding details" }
         val body = JSONObject().put("deviceSn", serial).put("grainNum", portions)
