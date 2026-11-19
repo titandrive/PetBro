@@ -65,7 +65,6 @@
             </intent-filter>
         </service>
 
-        <receiver android:name=".FeedTestReceiver" android:exported="false" />
         <!-- The meal alarm, and resetting it after a reboot or clock change. -->
         <receiver android:name=".MealReceiver" android:exported="false">
             <intent-filter>

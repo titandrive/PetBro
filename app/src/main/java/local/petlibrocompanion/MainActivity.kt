@@ -791,7 +791,7 @@ private fun LogScreen() {
             },
         ) {
             if (entries.isEmpty()) {
-                Text("Feeds from Feed Now, the schedule and tests show up here.", style = MaterialTheme.typography.bodySmall, color = noteColor)
+                Text("Feeds from Feed Now, the schedule, the tile and automation show up here.", style = MaterialTheme.typography.bodySmall, color = noteColor)
             }
             entries.forEachIndexed { i, entry ->
                 if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -849,14 +849,6 @@ private fun SettingsScreen() {
     val context = LocalContext.current
     val palette = LocalPalette.current
     val hapticsOn by Prefs.hapticsOn.collectAsStateWithLifecycle()
-    var confirmingTest by remember { mutableStateOf(false) }
-    var armed by remember { mutableStateOf(false) }
-    LaunchedEffect(armed) {
-        if (armed) {
-            kotlinx.coroutines.delay(15_000)
-            armed = false
-        }
-    }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = { Header("Settings", modeToggle = false) },
@@ -907,21 +899,6 @@ private fun SettingsScreen() {
                 }
             }
 
-            SectionCard("Feeder test", LucideBug, palette.warning) {
-                Text(
-                    "Arms one portion 10 seconds from now. Lock your phone after arming to check that meals go out while it sleeps.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = noteColor,
-                )
-                FilledTonalButton(
-                    onClick = {
-                        if (!Feeder.ready(context)) Toast.makeText(context, "Sign in and pick a feeder first", Toast.LENGTH_SHORT).show()
-                        else confirmingTest = true
-                    },
-                    enabled = !armed,
-                ) { Text(if (armed) "Armed: lock your phone" else "Arm 10-second test") }
-            }
-
             Text(
                 "PetBro ${BuildConfigInfo.version(context)} · Uses Petlibro's US cloud. Not affiliated with Petlibro.",
                 style = MaterialTheme.typography.bodySmall,
@@ -930,23 +907,6 @@ private fun SettingsScreen() {
             )
             Spacer(Modifier.height(8.dp))
         }
-    }
-    if (confirmingTest) {
-        AlertDialog(
-            onDismissRequest = { confirmingTest = false },
-            title = { Text("Dispense one portion?") },
-            text = { Text("Stay by the feeder. The test runs once, 10 seconds after you arm it, and shows up in History.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmingTest = false
-                    FeedTest.arm(context)
-                    Haptics.press(context)
-                    armed = true
-                }) { Text("Arm test") }
-            },
-            dismissButton = { TextButton(onClick = { confirmingTest = false }) { Text("Cancel") } },
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        )
     }
 }
 

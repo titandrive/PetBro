@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.PowerManager
-import android.os.SystemClock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONArray
@@ -242,45 +241,5 @@ class MealReceiver : BroadcastReceiver() {
         } else {
             MealScheduler.reschedule(context)
         }
-    }
-}
-
-/**
- * The feeder test: one portion, 10 seconds after arming, so you can lock the phone and see a
- * meal go out the way a scheduled one would.
- */
-object FeedTest {
-    fun arm(context: Context) {
-        val id = UUID.randomUUID().toString()
-        context.getSharedPreferences("feed-test-run", Context.MODE_PRIVATE).edit()
-            .putString("id", id).putLong("expires", SystemClock.elapsedRealtime() + 180_000).commit()
-        val intent = Intent(context, FeedTestReceiver::class.java).putExtra("testId", id)
-        val pending = PendingIntent.getBroadcast(context, 1, intent, PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val alarms = context.getSystemService(AlarmManager::class.java)
-        val at = SystemClock.elapsedRealtime() + 10_000
-        if (MealScheduler.canSchedule(context)) alarms.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pending)
-        else alarms.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pending)
-    }
-}
-
-class FeedTestReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        val state = context.getSharedPreferences("feed-test-run", Context.MODE_PRIVATE)
-        val id = intent.getStringExtra("testId")
-        if (id == null || id != state.getString("id", null)) return
-        val expired = SystemClock.elapsedRealtime() > state.getLong("expires", 0)
-        state.edit().clear().commit()
-        if (expired) {
-            FeedLog.add(context, FeedEntry(System.currentTimeMillis(), 1, FeedSource.TEST, false, "The test alarm came too late. Nothing was sent."))
-            return
-        }
-        val pending = goAsync()
-        Thread({
-            try {
-                Feeder.dispense(context, 1, FeedSource.TEST, id)
-            } finally {
-                pending.finish()
-            }
-        }, "petbro-test").start()
     }
 }
