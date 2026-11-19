@@ -1,0 +1,11 @@
+<resources>
+    <style name="PetBroTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#1e2030</item>
+        <item name="android:statusBarColor">#1e2030</item>
+        <item name="android:navigationBarColor">#1e2030</item>
+        <item name="android:colorAccent">#c6a0f6</item>
+        <item name="android:colorBackgroundFloating">#24273a</item>
+        <item name="android:textColorPrimary">#cad3f5</item>
+        <item name="android:textColorSecondary">#a5adcb</item>
+    </style>
+</resources>

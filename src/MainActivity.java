@@ -3,6 +3,12 @@ package local.petlibrocompanion;
 import android.app.Activity;
 import android.app.AlarmManager;
 import android.app.PendingIntent;
+import android.content.res.ColorStateList;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.view.Gravity;
+import android.view.View;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
@@ -33,6 +39,15 @@ import java.util.TimeZone;
 import javax.net.ssl.HttpsURLConnection;
 
 public final class MainActivity extends Activity {
+    private static final int MANTLE = 0xff1e2030;
+    private static final int BASE = 0xff24273a;
+    private static final int SURFACE = 0xff363a4f;
+    private static final int TEXT = 0xffcad3f5;
+    private static final int MUTED = 0xffa5adcb;
+    private static final int MAUVE = 0xffc6a0f6;
+    private static final int PEACH = 0xfff5a97f;
+
+    private LinearLayout credentials;
     private EditText email;
     private EditText password;
     private TextView result;
@@ -48,71 +63,167 @@ public final class MainActivity extends Activity {
     public void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
-        int padding = Math.round(24 * getResources().getDisplayMetrics().density);
-        LinearLayout form = new LinearLayout(this);
-        form.setOrientation(LinearLayout.VERTICAL);
-        form.setPadding(padding, padding, padding, padding);
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+
+        LinearLayout content = column();
+        content.setPadding(dp(16), dp(16), dp(16), dp(24));
+        content.setFocusableInTouchMode(true);
         ScrollView scroll = new ScrollView(this);
+        scroll.setBackgroundColor(MANTLE);
         scroll.setFillViewport(true);
-        scroll.addView(form);
+        scroll.addView(content);
         setContentView(scroll);
 
-        TextView title = new TextView(this);
-        title.setText("Check your Petlibro feeder");
-        title.setTextSize(24);
-        form.addView(title);
+        TextView title = label("PetBro", 28, TEXT);
+        title.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        title.setAccessibilityHeading(true);
+        title.setPadding(dp(12), dp(4), dp(12), dp(8));
+        content.addView(title);
 
-        TextView instructions = new TextView(this);
-        instructions.setText("Sign in with a US Petlibro account that has access to the feeder. Use a separate account with shared access to keep your main app session signed in.");
-        form.addView(instructions);
-
-        email = new EditText(this);
-        email.setHint("Petlibro email");
-        email.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
-        email.setSaveEnabled(false);
-        form.addView(email);
-
-        password = new EditText(this);
-        password.setHint("Petlibro password");
-        password.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        password.setSaveEnabled(false);
-        form.addView(password);
-
-        check = new Button(this);
-        check.setText("Sign in and list devices");
-        check.setOnClickListener(view -> checkAccount());
-        form.addView(check);
-
-        savedSession = getSharedPreferences("petlibro-session", MODE_PRIVATE);
-        forget = new Button(this);
-        forget.setText("Forget saved sign-in");
-        forget.setOnClickListener(view -> forgetSession());
-        form.addView(forget);
-
-        result = new TextView(this);
-        result.setAccessibilityLiveRegion(TextView.ACCESSIBILITY_LIVE_REGION_POLITE);
-        form.addView(result);
-
-        test = new Button(this);
-        test.setText("Test one portion in 10 seconds");
+        LinearLayout feeding = card(content, "Feeder test", "▶", PEACH);
+        add(feeding, label("Dispense one portion after 10 seconds.", 14, MUTED), 12);
+        test = action("Arm 10-second test", PEACH, MANTLE);
         test.setEnabled(false);
         test.setOnClickListener(view -> armTest());
-        form.addView(test);
+        add(feeding, test, 16);
 
-        testResult = new TextView(this);
-        testResult.setAccessibilityLiveRegion(TextView.ACCESSIBILITY_LIVE_REGION_POLITE);
-        form.addView(testResult);
-        forget.setEnabled(savedSession.contains("token"));
+        testResult = status();
+        add(feeding, testResult, 12);
+
+        LinearLayout account = card(content, "Petlibro account", "●", MAUVE);
+        result = status();
+        add(account, result, 12);
+
+        credentials = column();
+        add(account, credentials, 0);
+        add(credentials, label("Use a US Petlibro account with shared access to your feeder.", 14, MUTED), 12);
+        email = field("Email", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        add(credentials, email, 12);
+
+        password = field("Password", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        add(credentials, password, 10);
+
+        check = action("Sign in", MAUVE, MANTLE);
+        check.setOnClickListener(view -> checkAccount());
+        add(credentials, check, 12);
+
+        savedSession = getSharedPreferences("petlibro-session", MODE_PRIVATE);
+        forget = action("Forget saved sign-in", SURFACE, TEXT);
+        forget.setOnClickListener(view -> forgetSession());
+        add(account, forget, 12);
+        forget.setVisibility(View.GONE);
         if (savedSession.contains("token")) {
+            credentials.setVisibility(View.GONE);
             checkAccount(null, null);
         }
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private LinearLayout column() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        return layout;
+    }
+
+    private void add(LinearLayout parent, View view, int marginTop) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.topMargin = dp(marginTop);
+        parent.addView(view, params);
+    }
+
+    private GradientDrawable rounded(int color, int radius) {
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(color);
+        background.setCornerRadius(dp(radius));
+        return background;
+    }
+
+    private TextView label(String text, int size, int color) {
+        TextView label = new TextView(this);
+        label.setTypeface(Typeface.MONOSPACE);
+        label.setText(text);
+        label.setTextSize(size);
+        label.setTextColor(color);
+        return label;
+    }
+
+    private TextView status() {
+        TextView status = label("", 14, MUTED);
+        status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        status.setVisibility(View.GONE);
+        return status;
+    }
+
+    private void show(TextView status, String message) {
+        status.setText(message);
+        status.setVisibility(View.VISIBLE);
+    }
+
+    private LinearLayout card(LinearLayout parent, String title, String symbol, int accent) {
+        LinearLayout card = column();
+        int inset = dp(16);
+        card.setPadding(inset, inset, inset, inset);
+        card.setBackground(rounded(BASE, 24));
+        add(parent, card, 16);
+
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        TextView icon = label(symbol, 15, accent);
+        icon.setGravity(Gravity.CENTER);
+        icon.setBackground(rounded(SURFACE, 10));
+        icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        heading.addView(icon, dp(32), dp(32));
+        TextView name = label(title, 20, TEXT);
+        name.setAccessibilityHeading(true);
+        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(0, -2, 1);
+        nameParams.setMarginStart(dp(12));
+        heading.addView(name, nameParams);
+        card.addView(heading);
+        return card;
+    }
+
+    private EditText field(String hint, int inputType) {
+        EditText field = new EditText(this);
+        field.setHint(hint);
+        field.setInputType(inputType);
+        field.setTypeface(Typeface.MONOSPACE);
+        field.setTextSize(15);
+        field.setTextColor(TEXT);
+        field.setHintTextColor(MUTED);
+        field.setSingleLine();
+        field.setMinHeight(dp(52));
+        field.setPadding(dp(14), dp(8), dp(14), dp(8));
+        GradientDrawable background = rounded(SURFACE, 12);
+        background.setStroke(dp(1), 0xff494d64);
+        field.setBackground(background);
+        field.setSaveEnabled(false);
+        return field;
+    }
+
+    private Button action(String title, int fill, int textColor) {
+        Button button = new Button(this);
+        button.setText(title);
+        button.setAllCaps(false);
+        button.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        button.setMinHeight(dp(48));
+        button.setPadding(dp(16), dp(8), dp(16), dp(8));
+        int[][] states = {{-android.R.attr.state_enabled}, {}};
+        button.setTextColor(new ColorStateList(states, new int[]{MUTED, textColor}));
+        GradientDrawable shape = rounded(fill, 24);
+        shape.setColor(new ColorStateList(states, new int[]{SURFACE, fill}));
+        button.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33ffffff), shape, null));
+        button.setStateListAnimator(null);
+        return button;
     }
 
     private void checkAccount() {
         String address = email.getText().toString().trim();
         String secret = password.getText().toString();
         if (address.isEmpty() || secret.isEmpty()) {
-            result.setText("Enter your Petlibro email and password.");
+            show(result, "Enter your Petlibro email and password.");
             return;
         }
 
@@ -126,11 +237,12 @@ public final class MainActivity extends Activity {
         test.setEnabled(false);
         token = null;
         feeder = null;
-        result.setText(secret == null ? "Restoring Petlibro sign-in…" : "Checking Petlibro…");
+        show(result, secret == null ? "Restoring Petlibro sign-in…" : "Checking Petlibro…");
         new Thread(() -> {
             String message;
             String session = null;
             String serial = null;
+            boolean devicesLoaded = false;
             try {
                 if (secret == null) {
                     try {
@@ -146,6 +258,7 @@ public final class MainActivity extends Activity {
                 JSONArray devices = (JSONArray) request("/device/device/list", new JSONObject(),
                         session, TimeZone.getDefault().getID());
                 message = describeDevices(devices);
+                devicesLoaded = true;
                 if (secret != null) {
                     try {
                         if (!FeedTestReceiver.encryptToken(savedSession.edit(), session).commit()) {
@@ -178,11 +291,16 @@ public final class MainActivity extends Activity {
             String outcome = message;
             String checkedToken = session;
             String checkedFeeder = serial;
+            boolean verified = devicesLoaded;
             runOnUiThread(() -> {
                 if (!isDestroyed()) {
-                    result.setText(outcome);
+                    show(result, outcome);
                     check.setEnabled(true);
-                    forget.setEnabled(savedSession.contains("token") || checkedToken != null);
+                    boolean connected = checkedToken != null && verified;
+                    boolean remembered = savedSession.contains("token");
+                    credentials.setVisibility(connected ? View.GONE : View.VISIBLE);
+                    forget.setVisibility(connected || remembered ? View.VISIBLE : View.GONE);
+                    forget.setEnabled(true);
                     token = checkedToken;
                     feeder = checkedFeeder;
                     test.setEnabled(token != null && feeder != null && !feeder.isEmpty());
@@ -198,14 +316,15 @@ public final class MainActivity extends Activity {
         email.setText("");
         password.setText("");
         test.setEnabled(false);
-        forget.setEnabled(false);
-        result.setText("Saved sign-in cleared.");
+        forget.setVisibility(View.GONE);
+        credentials.setVisibility(View.VISIBLE);
+        show(result, "Saved sign-in cleared.");
     }
 
     private void armTest() {
         AlarmManager alarms = getSystemService(AlarmManager.class);
         if (!alarms.canScheduleExactAlarms()) {
-            result.setText("Allow Alarms & reminders, then return and tap the test button again.");
+            show(result, "Allow Alarms & reminders, then return and tap the test button again.");
             startActivity(new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
                     Uri.parse("package:" + getPackageName())));
             return;
@@ -227,9 +346,9 @@ public final class MainActivity extends Activity {
             alarms.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP,
                     SystemClock.elapsedRealtime() + 10000, pending);
             test.setEnabled(false);
-            testResult.setText("Armed. Lock your phone now and watch the feeder in 10 seconds.");
+            show(testResult, "Armed. Lock your phone now and watch the feeder in 10 seconds.");
         } catch (Exception e) {
-            testResult.setText("Could not arm the test. No feed was scheduled.");
+            show(testResult, "Could not arm the test. No feed was scheduled.");
         }
     }
 
@@ -238,7 +357,7 @@ public final class MainActivity extends Activity {
         super.onResume();
         String outcome = getSharedPreferences("feed-test", MODE_PRIVATE).getString("outcome", null);
         if (outcome != null) {
-            testResult.setText(outcome);
+            show(testResult, outcome);
         }
     }
 

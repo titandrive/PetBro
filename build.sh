@@ -9,7 +9,7 @@ out="$PWD/build"
 mkdir -p "$out/classes" "$out/dex"
 export JAVA_HOME="$jdk"
 export PATH="$jdk/bin:$PATH"
-"$tools/aapt" package -f -M AndroidManifest.xml -I "$platform" -F "$out/resources.apk"
+"$tools/aapt" package -f -M AndroidManifest.xml -S res -I "$platform" -F "$out/resources.apk"
 "$jdk/bin/javac" --release 11 -classpath "$platform" -d "$out/classes" src/*.java
 "$tools/d8" --min-api 28 --lib "$platform" --output "$out/dex" "$out/classes/local/petlibrocompanion/"*.class
 cp "$out/resources.apk" "$out/unsigned.apk"
