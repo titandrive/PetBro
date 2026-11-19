@@ -72,6 +72,7 @@ class MainActivity : ComponentActivity() {
         Meals.init(this)
         Feeder.init(this)
         MealScheduler.reschedule(this)
+        FeedNow.publishShortcut(this)
         setContent {
             val mode by ThemeStore.mode.collectAsStateWithLifecycle()
             val family by ThemeStore.family.collectAsStateWithLifecycle()
@@ -868,7 +869,40 @@ private fun SettingsScreen() {
                 SwitchRow("Haptic feedback", null, hapticsOn) { Prefs.setHaptics(context, it) }
             }
 
-            SectionCard("Feeder test", LucideZap, palette.warning) {
+            val quick by Prefs.quickPortionsFlow.collectAsStateWithLifecycle()
+            SectionCard("Quick feed", LucidePawPrint, palette.warning) {
+                Text(
+                    "What the Quick Settings tile, the launcher shortcut (long-press PetBro's icon) and automation feed, with no sheet to confirm.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = noteColor,
+                )
+                PortionStepper(quick) { Prefs.setQuickPortions(context, it) }
+            }
+
+            val automationOn by Prefs.automation.collectAsStateWithLifecycle()
+            SectionCard("Automation", LucideZap, palette.secondary) {
+                SwitchRow(
+                    "Allow automation apps",
+                    "Let Tasker, MacroDroid and other apps feed your pet.",
+                    automationOn,
+                ) { Prefs.setAutomation(context, it) }
+                Reveal(automationOn) {
+                    GapColumn(8.dp, modifier = Modifier.padding(top = 4.dp)) {
+                        Text("Send a broadcast intent with these (tap to copy):", style = MaterialTheme.typography.bodySmall, color = noteColor)
+                        CopyField("Action", FeedNow.ACTION)
+                        CopyField("Package", context.packageName)
+                        CopyField("Class", FeedNowReceiver::class.java.name)
+                        CopyField("Extra (optional, integer)", "${FeedNow.EXTRA_PORTIONS}: 1–${Petlibro.MAX_PORTIONS}")
+                        Text(
+                            "Without the extra it feeds the quick-feed amount. Feeds show up in History.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = noteColor,
+                        )
+                    }
+                }
+            }
+
+            SectionCard("Feeder test", LucideBug, palette.warning) {
                 Text(
                     "Arms one portion 10 seconds from now. Lock your phone after arming to check that meals go out while it sleeps.",
                     style = MaterialTheme.typography.bodySmall,

@@ -30,6 +30,41 @@
             </intent-filter>
         </activity>
 
+        <!-- "Feed now": the launcher shortcut and the tile's trampoline. No window. -->
+        <activity
+            android:name=".FeedNowActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="Feed now"
+            android:icon="@mipmap/ic_launcher"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.CREATE_SHORTCUT" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Broadcasts from automation apps (Tasker, MacroDroid), once allowed in Settings. -->
+        <receiver
+            android:name=".FeedNowReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="local.petlibrocompanion.action.FEED_NOW" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".FeedTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_logo"
+            android:label="Feed now"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <receiver android:name=".FeedTestReceiver" android:exported="false" />
         <!-- The meal alarm, and resetting it after a reboot or clock change. -->
         <receiver android:name=".MealReceiver" android:exported="false">

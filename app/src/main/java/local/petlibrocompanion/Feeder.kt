@@ -128,12 +128,12 @@ object Feeder {
     }
 
     /** Feed Now: dispenses [portions] and reports back in [onDone]. */
-    fun feedNow(context: Context, portions: Int, onDone: (FeedEntry) -> Unit) {
+    fun feedNow(context: Context, portions: Int, source: FeedSource = FeedSource.MANUAL, onDone: (FeedEntry) -> Unit) {
         if (_feeding.value) return
         val app = context.applicationContext
         _feeding.value = true
         scope.launch {
-            val entry = withContext(Dispatchers.IO) { dispense(app, portions, FeedSource.MANUAL) }
+            val entry = withContext(Dispatchers.IO) { dispense(app, portions, source) }
             _feeding.value = false
             if (entry.message.contains("Sign in again")) signOut(app)
             onDone(entry)
@@ -168,7 +168,9 @@ object Feeder {
     }
 }
 
-enum class FeedSource(val label: String) { MANUAL("Feed now"), SCHEDULED("Scheduled"), TEST("Test") }
+enum class FeedSource(val label: String) {
+    MANUAL("Feed now"), SCHEDULED("Scheduled"), TEST("Test"), QUICK("Tile or shortcut"), AUTOMATION("Automation")
+}
 
 data class FeedEntry(
     val time: Long,

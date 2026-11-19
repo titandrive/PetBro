@@ -3,6 +3,7 @@ package local.petlibrocompanion
 import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.util.UUID
 
 /** App-wide choices that aren't the theme or the schedule. */
 object Prefs {
@@ -11,12 +12,21 @@ object Prefs {
     private val _portions = MutableStateFlow(1)
     /** Feed Now's last amount, offered again next time. */
     val portions: StateFlow<Int> = _portions
+    private val _quick = MutableStateFlow(1)
+    /** What the tile, shortcut and automation feed. */
+    val quickPortionsFlow: StateFlow<Int> = _quick
+    private val _automation = MutableStateFlow(false)
+    /** Whether other apps may feed (by broadcast, or a shortcut made for them). */
+    val automation: StateFlow<Boolean> = _automation
 
     private fun prefs(context: Context) = context.getSharedPreferences("app", Context.MODE_PRIVATE)
 
     fun load(context: Context) {
-        _haptics.value = prefs(context).getBoolean("haptics", true)
-        _portions.value = prefs(context).getInt("portions", 1).coerceIn(1, Petlibro.MAX_PORTIONS)
+        val p = prefs(context)
+        _haptics.value = p.getBoolean("haptics", true)
+        _portions.value = p.getInt("portions", 1).coerceIn(1, Petlibro.MAX_PORTIONS)
+        _quick.value = quickPortions(context)
+        _automation.value = automationOn(context)
     }
 
     fun haptics(context: Context) = prefs(context).getBoolean("haptics", true)
@@ -29,5 +39,32 @@ object Prefs {
     fun setPortions(context: Context, n: Int) {
         prefs(context).edit().putInt("portions", n).apply()
         _portions.value = n
+    }
+
+    fun quickPortions(context: Context) = prefs(context).getInt("quickPortions", 1).coerceIn(1, Petlibro.MAX_PORTIONS)
+
+    fun setQuickPortions(context: Context, n: Int) {
+        prefs(context).edit().putInt("quickPortions", n).apply()
+        _quick.value = n
+        FeedNow.publishShortcut(context)
+    }
+
+    fun automationOn(context: Context) = prefs(context).getBoolean("automation", false)
+
+    fun setAutomation(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("automation", on).apply()
+        _automation.value = on
+    }
+
+    /**
+     * A secret only PetBro's own shortcuts and tile carry, so another app can't start a feed by
+     * launching the shortcut's activity directly.
+     */
+    fun feedKey(context: Context): String {
+        val p = prefs(context)
+        p.getString("feedKey", null)?.let { return it }
+        val key = UUID.randomUUID().toString()
+        p.edit().putString("feedKey", key).commit()
+        return key
     }
 }

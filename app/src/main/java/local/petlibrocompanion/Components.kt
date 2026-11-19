@@ -719,3 +719,29 @@ private fun ThemeSwatch(p: Palette, modifier: Modifier = Modifier.size(width = 4
         }
     }
 }
+
+/** A value to paste into an automation app; tapping copies it. */
+@Composable
+fun CopyField(label: String, value: String) {
+    val context = LocalContext.current
+    GapColumn(
+        2.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.small)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .clickable(onClickLabel = "Copy $label") {
+                Haptics.tick(context)
+                context.getSystemService(android.content.ClipboardManager::class.java)
+                    .setPrimaryClip(android.content.ClipData.newPlainText(label, value.substringBefore(":")))
+                // Android 13 and later show their own confirmation.
+                if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
+                    Toast.makeText(context, "$label copied", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodySmall)
+    }
+}
