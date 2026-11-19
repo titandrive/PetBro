@@ -19,7 +19,7 @@ Not affiliated with Petlibro.
 
 ## Schedule
 
-The Schedule tab works like PurgeBot's: one switch to feed automatically, then a card per meal.
+The Schedule tab has one switch to feed automatically, then a card per meal.
 
 | Option | Choices |
 |---|---|
@@ -54,7 +54,7 @@ A home-screen widget that feeds on a tap. It changes with its size:
 | Medium | The last feed's time, and *Tap to feed* |
 | Large | That, plus today's feeds, how often your pet ate, and the next meal |
 
-Each widget sets its own portions when it's placed (or from its long-press menu). The look is shared by every widget, as in Paid to Poop: match the app's theme or pick one, dark mode (App, System, Light or Dark), background opacity, show the last feed or just the paw, and whether a tap feeds or opens the app. These are also under **Settings → Widget look**.
+Each widget sets its own portions when it's placed (or from its long-press menu). The look is shared by every widget: match the app's theme or pick one, dark mode (App, System, Light or Dark), background opacity, show the last feed or just the paw, and whether a tap feeds or opens the app. These are also under **Settings → Widget look**.
 
 ## Tile, shortcut and automation
 
@@ -75,7 +75,7 @@ Taps on the widget, tile and shortcut give one buzz. PetBro runs in the backgrou
 
 ## Settings
 
-- **App theme:** System, Light or Dark (with AMOLED black, and Ultra AMOLED for black cards), and the twelve themes shared with PurgeBot, each with a light and dark version. The sun/moon in the header flips light and dark; long-press it to follow the system.
+- **App theme:** System, Light or Dark (with AMOLED black, and Ultra AMOLED for black cards), and twelve themes, each with a light and dark version. The sun/moon in the header flips light and dark; long-press it to follow the system.
 - **Feedback:** haptics on or off.
 - **Quick feed**, **Widget look** and **Automation**, above.
 
@@ -84,7 +84,7 @@ Taps on the widget, tile and shortcut give one buzz. PetBro runs in the backgrou
 | File | What it holds |
 |---|---|
 | `MainActivity.kt` | Compose UI: the tabs, Feed Now, the Feeder, Schedule, History and Settings screens |
-| `Components.kt` | Shared controls from PurgeBot: cards, switches, pill selectors, steppers, the theme picker and the clock dial |
+| `Components.kt` | Shared controls: cards, switches, pill selectors, steppers, the theme picker and the clock dial |
 | `Petlibro.kt` | Petlibro's API calls, and the Keystore-encrypted session with its cached devices and today's numbers |
 | `Feeder.kt` | Account state, sign-in and background checks, feeding, the feed history and meal notifications |
 | `Schedule.kt` | Meals, the exact alarm that serves them, and the receiver that resets it after a reboot |
@@ -98,9 +98,8 @@ Taps on the widget, tile and shortcut give one buzz. PetBro runs in the backgrou
 ## Credits
 
 - Petlibro API calls follow the [Home Assistant Petlibro integration](https://github.com/jjjonesjr33/petlibro).
-- UI, themes and shared controls from PurgeBot; widget settings from Paid to Poop.
 - UI font: [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) (SIL Open Font License 1.1).
-- Palettes: [Catppuccin](https://catppuccin.com), [Dracula](https://draculatheme.com) and Alucard, [Gruvbox](https://github.com/morhetz/gruvbox), [Nord](https://www.nordtheme.com), and the rest shared with Paid to Poop.
+- Palettes: [Catppuccin](https://catppuccin.com), [Dracula](https://draculatheme.com) and Alucard, [Gruvbox](https://github.com/morhetz/gruvbox), [Nord](https://www.nordtheme.com) and more.
 - Icons: [Lucide](https://lucide.dev) (ISC License).
 
 ## Building
