@@ -511,7 +511,7 @@ private fun InfoRow(label: String, value: String, onClick: () -> Unit) {
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.small)
             .clickable { Haptics.tick(context); onClick() }
-            .padding(vertical = 8.dp),
+            .padding(vertical = 4.dp),
     ) {
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -526,13 +526,18 @@ private fun AccountCard(email: String?) {
     val context = LocalContext.current
     val palette = LocalPalette.current
     var confirming by remember { mutableStateOf(false) }
-    SectionCard("Petlibro account", LucideUser, palette.mauve) {
+    // Sign out sits in the card's corner, like Refresh on the feeder card, to keep the page short.
+    SectionCard(
+        "Petlibro account",
+        LucideUser,
+        palette.mauve,
+        action = {
+            IconButton(onClick = { Haptics.tick(context); confirming = true }) {
+                Icon(LucideLogOut, contentDescription = "Sign out", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+            }
+        },
+    ) {
         Text(email?.let { "Signed in as $it" } ?: "Signed in", style = MaterialTheme.typography.bodyMedium)
-        FilledTonalButton(onClick = { confirming = true }) {
-            Icon(LucideLogOut, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Sign out")
-        }
     }
     if (confirming) {
         AlertDialog(
