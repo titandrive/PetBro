@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.LocalDate
+import kotlin.math.roundToInt
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -125,6 +126,14 @@ private fun whenPhrase(time: LocalDateTime): String {
         else -> time.format(dayFormat)
     }
     return "$day at ${time.toLocalTime().format(timeFormat)}"
+}
+
+/** "15 min", "1 hour", "6 hours" or "Day". */
+private fun everyLabel(minutes: Int) = when {
+    minutes < 60 -> "$minutes min"
+    minutes == 60 -> "1 hour"
+    minutes < 1440 -> "${minutes / 60} hours"
+    else -> "Day"
 }
 
 private fun whenLabel(time: LocalDateTime): String {
@@ -893,7 +902,8 @@ private fun ScheduleScreen() {
             val exactOff = !exactOk && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
             // With one meal its own card says when it's next, so the summary only shows for two
             // or more (or when nothing's coming up). Nothing to show, nothing taking up room.
-            val summary = next == null || meals.count { it.enabled } > 1
+            // Only when nothing's coming up: otherwise the next meal's own card says so.
+            val summary = next == null
             Reveal(on && (signedOut || !backgroundOk || exactOff || summary)) {
                 GapColumn(12.dp, modifier = Modifier.padding(top = 4.dp)) {
                     if (signedOut) {
@@ -920,7 +930,7 @@ private fun ScheduleScreen() {
         Reveal(on) {
             GapColumn(16.dp) {
                 meals.sortedBy { it.hour * 60 + it.minute }.forEach { meal ->
-                    MealCard(meal, canRemove = meals.size > 1, onChange = ::update) {
+                    MealCard(meal, isNext = Meals.nextDue(meals)?.second?.any { it.id == meal.id } == true, canRemove = meals.size > 1, onChange = ::update) {
                         Meals.set(context, meals.filterNot { it.id == meal.id })
                     }
                 }
@@ -966,7 +976,7 @@ private fun ScheduleScreen() {
 /** One meal: on or off, how it repeats, its time and portions, as PurgeBot's scheduled purge card. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MealCard(meal: Meal, canRemove: Boolean, onChange: (Meal) -> Unit, onRemove: () -> Unit) {
+private fun MealCard(meal: Meal, isNext: Boolean, canRemove: Boolean, onChange: (Meal) -> Unit, onRemove: () -> Unit) {
     val context = LocalContext.current
     val palette = LocalPalette.current
     var pickingTime by remember { mutableStateOf(false) }
@@ -1021,7 +1031,12 @@ private fun MealCard(meal: Meal, canRemove: Boolean, onChange: (Meal) -> Unit, o
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val next = meal.nextRun()
                     Text(
-                        if (next == null) "Pick at least one day" else "Next: ${whenPhrase(next)}",
+                        // Only the next meal of all says when; others stay quiet.
+                        when {
+                            next == null -> "Pick at least one day"
+                            isNext -> "Next meal: ${whenPhrase(next)}"
+                            else -> ""
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = if (next == null) MaterialTheme.colorScheme.error else palette.secondary,
                         modifier = Modifier.weight(1f),
@@ -1191,20 +1206,39 @@ private fun SettingsScreen() {
             }
 
             val alertsOn by Prefs.alerts.collectAsStateWithLifecycle()
-            val desiccantOn by Prefs.desiccant.collectAsStateWithLifecycle()
+            val kinds by Prefs.alertKinds.collectAsStateWithLifecycle()
+            val minutes by Prefs.alertMinutes.collectAsStateWithLifecycle()
             val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
             SectionCard("Feeder alerts", LucideBell, palette.warning) {
-                SwitchRow(
-                    "Alert me",
-                    "About every half hour, a notification when the feeder goes offline, runs low on food, its lid jams or it reports an error.",
-                    alertsOn,
-                ) {
+                SwitchRow("Feeder alerts", if (minutes == 1440) "Checked about once a day" else "Checked about every ${everyLabel(minutes).lowercase()}", alertsOn) {
                     if (it && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
                     Prefs.setAlerts(context, it)
                 }
                 Reveal(alertsOn) {
                     Column {
-                        SwitchRow("Desiccant reminders", "When the desiccant is due for a change", desiccantOn) { Prefs.setDesiccantAlerts(context, it) }
+                        // Eight stops from a quarter hour to once a day; saved on letting go.
+                        val stops = listOf(15, 30, 60, 120, 240, 360, 720, 1440)
+                        var stop by remember(minutes) { mutableIntStateOf(stops.indexOf(minutes).takeIf { it >= 0 } ?: 1) }
+                        Row(Modifier.padding(top = 4.dp)) {
+                            Text("Check every", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                            Text(everyLabel(stops[stop]), style = MaterialTheme.typography.bodyMedium, color = noteColor)
+                        }
+                        Slider(
+                            value = stop.toFloat(),
+                            onValueChange = {
+                                val i = it.roundToInt().coerceIn(0, stops.lastIndex)
+                                if (i != stop) Haptics.tick(context)
+                                stop = i
+                            },
+                            onValueChangeFinished = { Prefs.setAlertMinutes(context, stops[stop]) },
+                            valueRange = 0f..stops.lastIndex.toFloat(),
+                            steps = stops.size - 2,
+                        )
+                    Column(Modifier.padding(start = 16.dp)) {
+                        FeederAlerts.Problem.entries.forEach { kind ->
+                            SwitchRow(kind.setting, null, kind in kinds) { Prefs.setAlertKind(context, kind, it) }
+                        }
+                    }
                     }
                 }
             }

@@ -19,17 +19,17 @@ object FeederAlerts {
     private const val CHANNEL = "alerts"
     private const val CHECK = "local.petlibrocompanion.ALERT_CHECK"
 
-    enum class Problem(val title: String) {
-        OFFLINE("Feeder is offline"),
-        FOOD_LOW("Feeder is low on food"),
-        LID_BLOCKED("Feeder lid is blocked"),
-        ERROR("Feeder needs attention"),
-        DESICCANT("Time to change the desiccant"),
+    enum class Problem(val title: String, val setting: String) {
+        OFFLINE("Feeder is offline", "Offline"),
+        FOOD_LOW("Feeder is low on food", "Low on food"),
+        LID_BLOCKED("Feeder lid is blocked", "Lid blocked"),
+        ERROR("Feeder needs attention", "Errors"),
+        DESICCANT("Time to change the desiccant", "Desiccant due"),
     }
 
     private fun prefs(context: Context) = context.getSharedPreferences("alerts", Context.MODE_PRIVATE)
 
-    /** Sets the half-hourly check, or cancels it with alerts off. Inexact, so Android can batch it. */
+    /** Sets the repeating check (as often as set in Settings), or cancels it with alerts off. Inexact, so Android can batch it. */
     fun schedule(context: Context) {
         val alarms = context.getSystemService(AlarmManager::class.java)
         val pending = PendingIntent.getBroadcast(
@@ -38,12 +38,8 @@ object FeederAlerts {
         )
         alarms.cancel(pending)
         if (!Prefs.alertsOn(context) || !Session.hasToken(context)) return
-        alarms.setInexactRepeating(
-            AlarmManager.ELAPSED_REALTIME_WAKEUP,
-            SystemClock.elapsedRealtime() + AlarmManager.INTERVAL_HALF_HOUR,
-            AlarmManager.INTERVAL_HALF_HOUR,
-            pending,
-        )
+        val every = Prefs.alertMinutes(context) * 60_000L
+        alarms.setInexactRepeating(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + every, every, pending)
     }
 
     /** Blocking: checks the feeder and notifies about new problems. */
@@ -57,8 +53,8 @@ object FeederAlerts {
             if (p.foodLow) add(Problem.FOOD_LOW)
             if (p.lidBlocked) add(Problem.LID_BLOCKED)
             if (p.error != null) add(Problem.ERROR)
-            if (p.desiccantDue && Prefs.desiccantAlerts(context)) add(Problem.DESICCANT)
-        }
+            if (p.desiccantDue) add(Problem.DESICCANT)
+        }.filter { Prefs.alertKind(context, it) }.toSet()
         val before = prefs(context).getStringSet("active", emptySet()).orEmpty()
         prefs(context).edit().putStringSet("active", now.map { it.name }.toSet()).apply()
         (now.filter { it.name !in before }).forEach { problem ->

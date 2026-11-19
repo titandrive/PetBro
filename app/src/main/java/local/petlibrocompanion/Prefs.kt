@@ -15,9 +15,21 @@ object Prefs {
     private val _alerts = MutableStateFlow(true)
     /** Feeder alerts: a notification when the feeder goes offline, runs low, jams or errors. */
     val alerts: StateFlow<Boolean> = _alerts
-    private val _desiccant = MutableStateFlow(false)
-    /** Whether feeder alerts include the desiccant falling due. */
-    val desiccant: StateFlow<Boolean> = _desiccant
+    private val _alertMinutes = MutableStateFlow(30)
+    /** How often feeder alerts check, in minutes. */
+    val alertMinutes: StateFlow<Int> = _alertMinutes
+
+    fun alertMinutes(context: Context) = prefs(context).getInt("alertMinutes", 30)
+
+    fun setAlertMinutes(context: Context, minutes: Int) {
+        prefs(context).edit().putInt("alertMinutes", minutes).apply()
+        _alertMinutes.value = minutes
+        FeederAlerts.schedule(context)
+    }
+
+    private val _alertKinds = MutableStateFlow<Set<FeederAlerts.Problem>>(emptySet())
+    /** Which kinds of feeder alert are on. */
+    val alertKinds: StateFlow<Set<FeederAlerts.Problem>> = _alertKinds
 
     fun alertsOn(context: Context) = prefs(context).getBoolean("alerts", true)
 
@@ -27,11 +39,14 @@ object Prefs {
         FeederAlerts.schedule(context)
     }
 
-    fun desiccantAlerts(context: Context) = prefs(context).getBoolean("desiccantAlerts", false)
+    /** Every kind is on, except desiccant reminders (which used to be their own switch). */
+    fun alertKind(context: Context, kind: FeederAlerts.Problem) =
+        prefs(context).getBoolean("alert_${kind.name}", if (kind == FeederAlerts.Problem.DESICCANT) prefs(context).getBoolean("desiccantAlerts", false) else true)
 
-    fun setDesiccantAlerts(context: Context, on: Boolean) {
-        prefs(context).edit().putBoolean("desiccantAlerts", on).apply()
-        _desiccant.value = on
+    fun setAlertKind(context: Context, kind: FeederAlerts.Problem, on: Boolean) {
+        prefs(context).edit().putBoolean("alert_${kind.name}", on).apply()
+        _alertKinds.value = FeederAlerts.Problem.entries.filter { alertKind(context, it) }.toSet()
+        _alertMinutes.value = alertMinutes(context)
     }
 
     private val _automation = MutableStateFlow(false)
@@ -46,7 +61,7 @@ object Prefs {
         _quick.value = quickPortions(context)
         _automation.value = automationOn(context)
         _alerts.value = alertsOn(context)
-        _desiccant.value = desiccantAlerts(context)
+        _alertKinds.value = FeederAlerts.Problem.entries.filter { alertKind(context, it) }.toSet()
     }
 
     fun haptics(context: Context) = prefs(context).getBoolean("haptics", true)
