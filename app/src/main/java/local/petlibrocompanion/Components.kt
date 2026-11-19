@@ -73,6 +73,13 @@ import java.util.Locale
 
 // The building blocks of PurgeBot's screens, so PetBro looks and behaves the same.
 
+/** The header's controls' color, as the light/dark button's: the accent once picked by hand. */
+@Composable
+fun headerTint(): Color {
+    val mode by ThemeStore.mode.collectAsStateWithLifecycle()
+    return if (mode == ThemeMode.SYSTEM) MaterialTheme.colorScheme.onSurfaceVariant else LocalPalette.current.mauve
+}
+
 /** A screen's title row: the logo, the title, the light/dark button and an optional control. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -81,6 +88,8 @@ fun Header(
     modeToggle: Boolean = true,
     /** A back arrow in place of the logo, for a screen opened over a tab. */
     onBack: (() -> Unit)? = null,
+    /** Controls left of the light/dark button. */
+    lead: (@Composable () -> Unit)? = null,
     action: (@Composable () -> Unit)? = null,
 ) {
     val context = LocalContext.current
@@ -115,6 +124,7 @@ fun Header(
             autoSize = TextAutoSize.StepBased(minFontSize = 14.sp, maxFontSize = titleStyle.fontSize, stepSize = 1.sp),
             modifier = Modifier.weight(1f),
         )
+        lead?.invoke()
         if (modeToggle) {
             val tint = if (mode == ThemeMode.SYSTEM) MaterialTheme.colorScheme.onSurfaceVariant else palette.mauve
             Box(

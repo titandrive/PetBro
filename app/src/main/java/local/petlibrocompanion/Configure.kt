@@ -73,12 +73,13 @@ fun ConfigureScreen() {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            Header("Configure") {
+            // Refresh beside the light/dark button, in the same color.
+            Header("Configure", lead = {
                 IconButton(onClick = { Haptics.tick(context); reload() }, enabled = !loading && serial != null) {
                     if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    else Icon(LucideRefreshCw, contentDescription = "Refresh settings", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                    else Icon(LucideRefreshCw, contentDescription = "Refresh settings", tint = headerTint(), modifier = Modifier.size(20.dp))
                 }
-            }
+            })
         },
     ) { padding ->
         GapColumn(

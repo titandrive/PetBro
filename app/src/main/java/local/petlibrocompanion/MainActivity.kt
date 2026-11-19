@@ -383,13 +383,14 @@ private fun ScreenColumn(
     title: String,
     header: (@Composable () -> Unit)? = null,
     onBack: (() -> Unit)? = null,
+    lead: (@Composable () -> Unit)? = null,
     /** Room between cards; the home page runs tighter so it fits on one screen. */
     gap: androidx.compose.ui.unit.Dp = 16.dp,
     content: @Composable () -> Unit,
 ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        topBar = { Header(title, modeToggle = onBack == null, onBack = onBack, action = header) },
+        topBar = { Header(title, modeToggle = onBack == null, onBack = onBack, lead = lead, action = header) },
     ) { padding ->
         GapColumn(
             gap,
@@ -412,7 +413,16 @@ private fun HomeScreen(onOpenSchedule: () -> Unit, onOpenLog: () -> Unit) {
     val context = LocalContext.current
     val palette = LocalPalette.current
     val account by Feeder.account.collectAsStateWithLifecycle()
-    ScreenColumn("PetBro", gap = 12.dp) {
+    ScreenColumn(
+        "PetBro",
+        gap = 12.dp,
+        // History, beside the light/dark button.
+        lead = {
+            IconButton(onClick = { Haptics.tick(context); onOpenLog() }) {
+                Icon(LucideHistory, contentDescription = "History", tint = headerTint(), modifier = Modifier.size(22.dp))
+            }
+        },
+    ) {
         when (val a = account) {
             AccountState.SignedOut -> SignInCard()
             is AccountState.Checking -> SectionCard("Petlibro", LucideRouter, palette.secondary) {
