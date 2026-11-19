@@ -8,7 +8,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -68,8 +67,6 @@ import java.time.format.DateTimeFormatter
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // The sign-in form and feeder details stay out of screenshots and the recents preview.
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         ThemeStore.load(this)
         Prefs.load(this)
         Meals.init(this)

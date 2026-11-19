@@ -317,12 +317,16 @@ object FeedLog {
 
     /**
      * PetBro's feeds with the feeder's record merged in, newest first. A feeder record within
-     * three minutes of a PetBro feed of the same size is that feed; the rest went out some other way.
+     * three minutes of a PetBro feed is that feed (its count can lag, so sizes aren't compared);
+     * the rest went out some other way. Each PetBro feed accounts for one record at most.
      */
     fun merge(own: List<FeedEntry>, feeder: List<FeederRecord>): List<FeedEntry> {
         val window = 3 * 60_000L
+        val unclaimed = own.filter { it.ok }.toMutableList()
         val others = feeder.filter { r ->
-            own.none { it.ok && it.portions == r.portions && kotlin.math.abs(it.time - r.time) <= window }
+            val match = unclaimed.minByOrNull { kotlin.math.abs(it.time - r.time) }?.takeIf { kotlin.math.abs(it.time - r.time) <= window }
+            if (match != null) unclaimed.remove(match)
+            match == null && r.portions > 0
         }.map { FeedEntry(it.time, it.portions, FeedSource.FEEDER, ok = true, message = "", meal = it.label) }
         return (own + others).sortedByDescending { it.time }
     }

@@ -408,7 +408,9 @@ object Petlibro {
         val out = mutableListOf<FeederRecord>()
         fun take(r: JSONObject) {
             val time = r.optLong("recordTime", 0L).takeIf { it > 0 } ?: return
-            out += FeederRecord(time, r.optInt("actualGrainNum", r.optInt("expectGrainNum", 0)), r.optString("eventType"))
+            // Petlibro can log a meal before its dispensed count is in (0): fall back to what was asked for.
+            val portions = r.optInt("actualGrainNum", 0).takeIf { it > 0 } ?: r.optInt("expectGrainNum", 0)
+            out += FeederRecord(time, portions, r.optString("eventType"))
         }
         for (i in 0 until data.length()) {
             val day = data.optJSONObject(i) ?: continue

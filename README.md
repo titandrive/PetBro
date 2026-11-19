@@ -19,7 +19,6 @@ Not affiliated with Petlibro.
 - **Requests:** plain HTTPS calls to `api.us.petlibro.com`, the same endpoints the Petlibro app uses. They're not a public API, so a Petlibro change can break them.
 - **Tabs** along the bottom: Feeder, Schedule, Configure and Settings, with the paw button in the middle. History opens from the clock button in the Feeder header, or from the Meals card.
 - **Starts instantly:** the devices, today's numbers, feeder details and settings from last time show at once, while a quiet check runs in the background (the refresh button spins; a note says if Petlibro couldn't be reached).
-- **Private:** PetBro blocks screenshots and hides its screen in the recent-apps view, since it shows your account and feeder.
 
 ## Feed now
 
