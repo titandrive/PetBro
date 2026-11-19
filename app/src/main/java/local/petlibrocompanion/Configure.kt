@@ -195,15 +195,17 @@ private fun ConfigCards(c: FeederConfig, error: String?, apply: (Setting, Feeder
                 Text("Volume", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                 Text("${shown.toInt()}%", style = MaterialTheme.typography.bodyMedium, color = noteColor)
             }
+            // Ten stops, 10% to 100%, with a mark at each.
             Slider(
-                value = shown,
+                value = shown.coerceIn(10f, 100f),
                 onValueChange = {
-                    val stepped = ((it / 10).toInt() * 10).coerceAtLeast(1)
+                    val stepped = (Math.round(it / 10f) * 10).coerceIn(10, 100)
                     if (stepped != shown.toInt()) Haptics.tick(context)
                     shown = stepped.toFloat()
                 },
                 onValueChangeFinished = { apply(Setting.Volume(shown.toInt()), c.copy(volume = shown.toInt()), null) },
-                valueRange = 1f..100f,
+                valueRange = 10f..100f,
+                steps = 8,
             )
         }
         c.lightAllowed?.let { on -> SwitchRow("Allow light", "Petlibro's master switch for the indicator light", on) { apply(Setting.LightAllowed(it), c.copy(lightAllowed = it), null) } }
