@@ -9,11 +9,8 @@ import java.util.UUID
 object Prefs {
     private val _haptics = MutableStateFlow(true)
     val hapticsOn: StateFlow<Boolean> = _haptics
-    private val _portions = MutableStateFlow(1)
-    /** Feed Now's last amount, offered again next time. */
-    val portions: StateFlow<Int> = _portions
     private val _quick = MutableStateFlow(1)
-    /** What the tile, shortcut and automation feed. */
+    /** What a tap on Feed Now, the tile, the shortcut and automation feed. */
     val quickPortionsFlow: StateFlow<Int> = _quick
     private val _automation = MutableStateFlow(false)
     /** Whether other apps may feed (by broadcast, or a shortcut made for them). */
@@ -24,7 +21,6 @@ object Prefs {
     fun load(context: Context) {
         val p = prefs(context)
         _haptics.value = p.getBoolean("haptics", true)
-        _portions.value = p.getInt("portions", 1).coerceIn(1, Petlibro.MAX_PORTIONS)
         _quick.value = quickPortions(context)
         _automation.value = automationOn(context)
     }
@@ -34,11 +30,6 @@ object Prefs {
     fun setHaptics(context: Context, on: Boolean) {
         prefs(context).edit().putBoolean("haptics", on).apply()
         _haptics.value = on
-    }
-
-    fun setPortions(context: Context, n: Int) {
-        prefs(context).edit().putInt("portions", n).apply()
-        _portions.value = n
     }
 
     fun quickPortions(context: Context) = prefs(context).getInt("quickPortions", 1).coerceIn(1, Petlibro.MAX_PORTIONS)

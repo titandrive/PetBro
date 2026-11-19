@@ -60,7 +60,6 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -71,6 +70,7 @@ class MainActivity : ComponentActivity() {
         Prefs.load(this)
         Meals.init(this)
         Feeder.init(this)
+        Clock.load(this)
         MealScheduler.reschedule(this)
         FeedNow.publishShortcut(this)
         setContent {
@@ -89,12 +89,19 @@ class MainActivity : ComponentActivity() {
             AppTheme(palette) { App() }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        // Picks up a change to 24-hour time made while the app was in the background.
+        Clock.load(this)
+    }
 }
 
 /** The app's four places, along the bottom, with Feed Now in the middle. */
 private enum class Tab(val label: String) { HOME("Feeder"), SCHEDULE("Schedule"), LOG("History"), SETTINGS("Settings") }
 
-private val timeFormat: DateTimeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
+/** Times as the phone shows them: 24-hour or AM/PM, as set in Android's clock settings. */
+private val timeFormat: DateTimeFormatter get() = Clock.format
 private val dayFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM")
 
 /** "Today, 8:00 AM", "Tomorrow, …" or "Tue 18 Nov, …". */
@@ -154,14 +161,16 @@ private fun App() {
                         ready -> FeedState.READY
                         else -> FeedState.BLOCKED
                     },
-                    onFeed = {
+                    // A tap feeds the set amount straight away; holding opens the sheet to change it.
+                    onFeed = { configure ->
                         when {
-                            busy -> {}
                             !ready -> {
                                 Toast.makeText(context, if (account is AccountState.SignedIn) "Pick a feeder first" else "Sign in to feed", Toast.LENGTH_SHORT).show()
                                 tab = Tab.HOME
                             }
-                            else -> feeding = true
+                            configure -> feeding = true
+                            busy -> {}
+                            else -> feed(context, Prefs.quickPortions(context))
                         }
                     },
                     onSelect = { tab = it },
@@ -195,8 +204,20 @@ private fun App() {
 
 private enum class FeedState { READY, FEEDING, BLOCKED }
 
+/** Feed Now from the app: dispenses [portions] and says how it went. */
+private fun feed(context: android.content.Context, portions: Int) {
+    Feeder.feedNow(context, portions) { entry ->
+        if (entry.ok) Haptics.finished(context)
+        Toast.makeText(
+            context,
+            if (entry.ok) "Dispensing ${portionsLabel(entry.portions)}" else entry.message,
+            Toast.LENGTH_LONG,
+        ).show()
+    }
+}
+
 @Composable
-private fun TabBar(selected: Tab, scheduled: Boolean, feed: FeedState, onFeed: () -> Unit, onSelect: (Tab) -> Unit) {
+private fun TabBar(selected: Tab, scheduled: Boolean, feed: FeedState, onFeed: (configure: Boolean) -> Unit, onSelect: (Tab) -> Unit) {
     val context = LocalContext.current
     val palette = LocalPalette.current
     Box(Modifier.fillMaxWidth()) {
@@ -243,9 +264,13 @@ private fun TabBar(selected: Tab, scheduled: Boolean, feed: FeedState, onFeed: (
     }
 }
 
-/** Feed Now: a round button in the middle of the tab bar that stands up out of it, like PurgeBot's Start. */
+/**
+ * Feed Now: a round button in the middle of the tab bar that stands up out of it, like PurgeBot's
+ * Start. A tap feeds the set amount; holding opens the sheet to change it.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FeedButton(state: FeedState, onFeed: () -> Unit, modifier: Modifier = Modifier) {
+private fun FeedButton(state: FeedState, onFeed: (configure: Boolean) -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val palette = LocalPalette.current
     val fill = when (state) {
@@ -261,10 +286,18 @@ private fun FeedButton(state: FeedState, onFeed: () -> Unit, modifier: Modifier 
             .shadow(6.dp, CircleShape)
             .clip(CircleShape)
             .background(fill)
-            .clickable(onClickLabel = "Feed now") {
-                Haptics.press(context)
-                onFeed()
-            },
+            .combinedClickable(
+                onClickLabel = "Feed now",
+                onLongClickLabel = "Change portions",
+                onLongClick = {
+                    Haptics.press(context)
+                    onFeed(true)
+                },
+                onClick = {
+                    Haptics.press(context)
+                    onFeed(false)
+                },
+            ),
     ) {
         if (state == FeedState.FEEDING) {
             CircularProgressIndicator(Modifier.matchParentSize().padding(4.dp), color = content, strokeWidth = 2.5.dp)
@@ -273,13 +306,12 @@ private fun FeedButton(state: FeedState, onFeed: () -> Unit, modifier: Modifier 
     }
 }
 
-/** How many portions to give now, then Dispense. */
+/** Held Feed Now: sets how much a tap feeds, and can dispense it now. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun FeedSheet(onDismiss: () -> Unit) {
     val context = LocalContext.current
-    val last by Prefs.portions.collectAsStateWithLifecycle()
-    var portions by rememberSaveable { mutableIntStateOf(last) }
+    val portions by Prefs.quickPortionsFlow.collectAsStateWithLifecycle()
     val account by Feeder.account.collectAsStateWithLifecycle()
     val name = (account as? AccountState.SignedIn)?.feeder?.name
     ModalBottomSheet(
@@ -290,7 +322,11 @@ private fun FeedSheet(onDismiss: () -> Unit) {
         GapColumn(12.dp, modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp).navigationBarsPadding()) {
             Column {
                 Text("Feed now", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                name?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = noteColor) }
+                Text(
+                    (name?.let { "$it · " } ?: "") + "A tap on the paw feeds this much",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = noteColor,
+                )
             }
             Column(
                 Modifier
@@ -299,21 +335,13 @@ private fun FeedSheet(onDismiss: () -> Unit) {
                     .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
-                PortionStepper(portions) { portions = it }
+                PortionStepper(portions) { Prefs.setQuickPortions(context, it) }
             }
             Button(
                 onClick = {
                     Haptics.press(context)
-                    Prefs.setPortions(context, portions)
                     onDismiss()
-                    Feeder.feedNow(context, portions) { entry ->
-                        if (entry.ok) Haptics.finished(context)
-                        Toast.makeText(
-                            context,
-                            if (entry.ok) "Dispensing ${portionsLabel(entry.portions)}" else entry.message,
-                            Toast.LENGTH_LONG,
-                        ).show()
-                    }
+                    if (!Feeder.feeding.value) feed(context, portions)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = LocalPalette.current.warning),
                 shape = MaterialTheme.shapes.extraLarge,
@@ -734,20 +762,10 @@ private fun MealCard(meal: Meal, canRemove: Boolean, onChange: (Meal) -> Unit, o
     }
 
     if (pickingTime) {
-        val state = rememberTimePickerState(initialHour = meal.hour, initialMinute = meal.minute)
-        AlertDialog(
-            onDismissRequest = { pickingTime = false },
-            title = { Text("Feed at") },
-            text = { TimePicker(state = state) },
-            confirmButton = {
-                TextButton(onClick = {
-                    pickingTime = false
-                    onChange(meal.copy(hour = state.hour, minute = state.minute))
-                }) { Text("Set") }
-            },
-            dismissButton = { TextButton(onClick = { pickingTime = false }) { Text("Cancel") } },
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        )
+        TimeDialog("Feed at", meal.hour, meal.minute, onDismiss = { pickingTime = false }) { h, m ->
+            pickingTime = false
+            onChange(meal.copy(hour = h, minute = m))
+        }
     }
 
     if (renaming) {
@@ -874,7 +892,7 @@ private fun SettingsScreen() {
             val quick by Prefs.quickPortionsFlow.collectAsStateWithLifecycle()
             SectionCard("Quick feed", LucidePawPrint, palette.warning) {
                 Text(
-                    "What the Quick Settings tile, the launcher shortcut (long-press PetBro's icon) and automation feed, with no sheet to confirm.",
+                    "What a tap on the paw button, the Quick Settings tile, the launcher shortcut and automation feed. Hold the paw button to change it there too.",
                     style = MaterialTheme.typography.bodySmall,
                     color = noteColor,
                 )

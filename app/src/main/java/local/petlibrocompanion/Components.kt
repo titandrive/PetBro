@@ -13,6 +13,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -756,5 +758,217 @@ fun CopyField(label: String, value: String) {
     ) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/** The phone's 12- or 24-hour choice, for formatting times and the time picker. */
+object Clock {
+    var is24Hour = false
+        private set
+    var format: java.time.format.DateTimeFormatter = java.time.format.DateTimeFormatter.ofPattern("h:mm a")
+        private set
+
+    fun load(context: android.content.Context) {
+        is24Hour = android.text.format.DateFormat.is24HourFormat(context)
+        format = java.time.format.DateTimeFormatter.ofPattern(if (is24Hour) "H:mm" else "h:mm a", Locale.getDefault())
+    }
+}
+
+/**
+ * A clock-dial time picker, like Material's, drawn here so its selection circle can be smaller:
+ * Material's covers the next number on the 24-hour dial's inner ring. Follows the phone's 12- or
+ * 24-hour setting. Tap or drag the hour, and it moves on to the minutes; tap the hour or minute
+ * at the top to switch. Every change ticks.
+ */
+@Composable
+fun TimeDialog(title: String, hour: Int, minute: Int, onDismiss: () -> Unit, onSet: (hour: Int, minute: Int) -> Unit) {
+    val context = LocalContext.current
+    val is24 = Clock.is24Hour
+    var h by rememberSaveable { mutableIntStateOf(hour) }
+    var m by rememberSaveable { mutableIntStateOf(minute) }
+    var pickingMinutes by rememberSaveable { mutableStateOf(false) }
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            modifier = Modifier.padding(horizontal = 16.dp).widthIn(max = 420.dp),
+        ) {
+            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TimeBox("%02d".format(if (is24) h else (h + 11) % 12 + 1), !pickingMinutes, "Select hour") {
+                        Haptics.tick(context); pickingMinutes = false
+                    }
+                    Text(":", style = MaterialTheme.typography.displayLarge, modifier = Modifier.padding(horizontal = 4.dp))
+                    TimeBox("%02d".format(m), pickingMinutes, "Select minutes") {
+                        Haptics.tick(context); pickingMinutes = true
+                    }
+                    if (!is24) {
+                        Spacer(Modifier.width(12.dp))
+                        Column(
+                            Modifier
+                                .clip(MaterialTheme.shapes.small)
+                                .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.small)
+                        ) {
+                            listOf("AM" to (h < 12), "PM" to (h >= 12)).forEach { (label, on) ->
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(width = 52.dp, height = 40.dp)
+                                        .background(if (on) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+                                        .selectable(on, role = Role.RadioButton) {
+                                            if (!on) { Haptics.tick(context); h = (h + 12) % 24 }
+                                        },
+                                ) { Text(label, style = MaterialTheme.typography.titleMedium) }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(28.dp))
+                ClockDial(
+                    is24 = is24,
+                    minutes = pickingMinutes,
+                    hour = h,
+                    minute = m,
+                    onHour = { if (it != h) { Haptics.tick(context); h = it } },
+                    onMinute = { if (it != m) { Haptics.tick(context); m = it } },
+                    onHourDone = { pickingMinutes = true },
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    TextButton(onClick = { Haptics.tick(context); onSet(h, m) }) { Text("Set") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimeBox(text: String, selected: Boolean, description: String, onClick: () -> Unit) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(width = 96.dp, height = 80.dp)
+            .clip(MaterialTheme.shapes.small)
+            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)
+            .selectable(selected, role = Role.Tab, onClick = onClick)
+            .semantics { contentDescription = "$description, $text" },
+    ) {
+        Text(text, style = MaterialTheme.typography.displayMedium, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+private val DIAL = 256.dp
+private val OUTER_RING = 101.dp
+private val INNER_RING = 66.dp
+/** The selection circle: smaller than Material's 48dp, so it stays clear of the inner ring. */
+private val SELECTOR = 34.dp
+
+/**
+ * The dial: hours on one ring (12-hour), or 0–11 outside and 12–23 inside (24-hour); or minutes
+ * in fives. A drag follows the finger; letting go of an hour moves on to the minutes.
+ */
+@Composable
+private fun ClockDial(
+    is24: Boolean,
+    minutes: Boolean,
+    hour: Int,
+    minute: Int,
+    onHour: (Int) -> Unit,
+    onMinute: (Int) -> Unit,
+    onHourDone: () -> Unit,
+) {
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val primary = MaterialTheme.colorScheme.primary
+    val onPrimary = MaterialTheme.colorScheme.onPrimary
+    // Where each label goes: (text, value, angle in twelfths of a turn from the top, on the inner ring).
+    val labels: List<Triple<String, Int, Boolean>> = when {
+        minutes -> (0 until 12).map { Triple("%02d".format(it * 5), it * 5, false) }
+        is24 -> (0 until 12).map { Triple("$it", it, false) } + (12 until 24).map { Triple("$it", it, true) }
+        else -> (1..12).map { Triple("$it", it % 12, false) }
+    }
+    val selectedInner = !minutes && is24 && hour >= 12
+    // The selection's angle, in turns from the top.
+    val turn = if (minutes) minute / 60f else (hour % 12) / 12f
+    val radius = if (selectedInner) INNER_RING else OUTER_RING
+    val update by rememberUpdatedState { x: Float, y: Float ->
+        val c = with(density) { DIAL.toPx() } / 2
+        val dx = x - c
+        val dy = y - c
+        val angle = ((Math.toDegrees(kotlin.math.atan2(dx.toDouble(), -dy.toDouble())) + 360) % 360)
+        if (minutes) {
+            onMinute((Math.round(angle / 6).toInt()) % 60)
+        } else {
+            val twelfth = (Math.round(angle / 30).toInt()) % 12
+            val inner = is24 && kotlin.math.hypot(dx, dy) < with(density) { ((OUTER_RING + INNER_RING) / 2).toPx() }
+            onHour(if (is24) twelfth + if (inner) 12 else 0 else twelfth + if (hour >= 12) 12 else 0)
+        }
+    }
+    val hourDone by rememberUpdatedState(onHourDone)
+    val minutesNow by rememberUpdatedState(minutes)
+    Box(
+        modifier = Modifier
+            .size(DIAL)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    update(down.position.x, down.position.y)
+                    var released = false
+                    while (!released) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (change.pressed) {
+                            update(change.position.x, change.position.y)
+                            change.consume()
+                        } else {
+                            released = true
+                        }
+                    }
+                    if (released && !minutesNow) hourDone()
+                }
+            },
+    ) {
+        // The hand: center dot, line and selection circle.
+        androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
+            val c = size.width / 2
+            val r = radius.toPx()
+            val a = turn * 2 * Math.PI
+            val end = androidx.compose.ui.geometry.Offset(c + (r * kotlin.math.sin(a)).toFloat(), c - (r * kotlin.math.cos(a)).toFloat())
+            drawCircle(primary, radius = 4.dp.toPx(), center = androidx.compose.ui.geometry.Offset(c, c))
+            drawLine(primary, androidx.compose.ui.geometry.Offset(c, c), end, strokeWidth = 2.dp.toPx())
+            drawCircle(primary, radius = SELECTOR.toPx() / 2, center = end)
+        }
+        labels.forEachIndexed { i, (text, value, inner) ->
+            val position = if (minutes || !is24) i else value % 12
+            val a = (if (!minutes && !is24) (value % 12) else position) / 12.0 * 2 * Math.PI
+            val r = if (inner) INNER_RING else OUTER_RING
+            val selected = if (minutes) minute == value else hour == value || (!is24 && hour % 12 == value)
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(SELECTOR)
+                    .offset(
+                        x = DIAL / 2 - SELECTOR / 2 + r * kotlin.math.sin(a).toFloat(),
+                        y = DIAL / 2 - SELECTOR / 2 - r * kotlin.math.cos(a).toFloat(),
+                    ),
+            ) {
+                Text(
+                    text,
+                    style = if (inner) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge,
+                    color = if (selected) onPrimary else MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
     }
 }
