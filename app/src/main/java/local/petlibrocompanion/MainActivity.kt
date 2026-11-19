@@ -43,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
@@ -321,7 +322,7 @@ private fun FeedSheet(onDismiss: () -> Unit) {
     val context = LocalContext.current
     val portions by Prefs.quickPortionsFlow.collectAsStateWithLifecycle()
     val account by Feeder.account.collectAsStateWithLifecycle()
-    val name = (account as? AccountState.SignedIn)?.feeder?.name
+    val name = (account as? AccountState.SignedIn)?.feeder?.label
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -486,14 +487,14 @@ private fun FeederCard(a: AccountState.SignedIn) {
             }
             feeders.size == 1 -> DeviceRow(feeders[0], picked = true, onPick = null)
             else -> {
-                Text("Pick the feeder PetBro feeds", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Tap a feeder to pick the one PetBro feeds", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 feeders.forEach { d -> DeviceRow(d, picked = d.serial == a.feeder?.serial) { Feeder.pickFeeder(context, d) } }
             }
         }
         val others = a.devices.filterNot { it.canFeed }
         if (others.isNotEmpty()) {
             Text(
-                "Also on this account: " + others.joinToString { it.name + if (it.model.isNotEmpty()) " (${it.model})" else "" },
+                "Also on this account: " + others.joinToString { it.label + if (it.model.isNotEmpty()) " (${it.model})" else "" },
                 style = MaterialTheme.typography.bodySmall,
                 color = noteColor,
             )
@@ -505,6 +506,7 @@ private fun FeederCard(a: AccountState.SignedIn) {
 private fun DeviceRow(device: Device, picked: Boolean, onPick: (() -> Unit)?) {
     val context = LocalContext.current
     val palette = LocalPalette.current
+    var open by rememberSaveable { mutableStateOf(false) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -513,14 +515,203 @@ private fun DeviceRow(device: Device, picked: Boolean, onPick: (() -> Unit)?) {
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             // With several feeders to pick from, the picked one is outlined in the accent.
             .then(if (picked && onPick != null) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, MaterialTheme.shapes.medium) else Modifier)
-            .then(if (onPick != null) Modifier.selectable(picked, role = Role.RadioButton) { Haptics.tick(context); onPick() } else Modifier)
+            // Tapping opens its details (and, with several, the button to feed from it).
+            .clickable(onClickLabel = "Feeder details") { Haptics.tick(context); open = true }
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
         Column(Modifier.weight(1f)) {
-            Text(device.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(device.model, style = MaterialTheme.typography.bodySmall, color = noteColor)
+            Text(device.label, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(device.modelName, style = MaterialTheme.typography.bodySmall, color = noteColor)
         }
         if (picked) Pill("Ready", palette.success)
+    }
+    if (open) FeederSheet(device, picked, onPick, onDismiss = { open = false })
+}
+
+/** Everything Petlibro reports about a feeder, with an edit button for its name. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FeederSheet(device: Device, picked: Boolean, onPick: (() -> Unit)?, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val palette = LocalPalette.current
+    val account by Feeder.account.collectAsStateWithLifecycle()
+    // The latest copy, so a rename shows straight away.
+    val current = (account as? AccountState.SignedIn)?.devices?.firstOrNull { it.serial == device.serial } ?: device
+    var renaming by remember { mutableStateOf(false) }
+    var details by remember { mutableStateOf<FeederDetails?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(device.serial) {
+        val token = Session.token(context)
+        val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { Petlibro.details(token ?: throw java.io.IOException("Not signed in."), device.serial) }
+        }
+        result.onSuccess { details = it }.onFailure { error = it.message ?: "Couldn't reach Petlibro." }
+    }
+    val today by Feeder.today.collectAsStateWithLifecycle()
+    val pets by Feeder.pets.collectAsStateWithLifecycle()
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        // A fixed height from the start, so the sheet doesn't grow (and jump) when the details
+        // arrive; the name stays pinned while the details scroll under it.
+        Column(Modifier.fillMaxHeight(0.85f).themeScanlines()) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 20.dp, end = 12.dp, bottom = 8.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(current.label, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        if (current.nickname != null && current.name != current.modelName) "${current.name} · ${current.modelName}" else current.modelName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = noteColor,
+                    )
+                }
+                FilledTonalIconButton(onClick = { Haptics.tick(context); renaming = true }) {
+                    Icon(LucidePencil, contentDescription = "Rename feeder", modifier = Modifier.size(18.dp))
+                }
+            }
+        // No stretch at the ends, and scroll left over at the bottom stays with the list rather
+        // than going to the sheet, which is already as tall as it gets and shook trying to move.
+        CompositionLocalProvider(androidx.compose.foundation.LocalOverscrollFactory provides null) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .weight(1f)
+                .nestedScroll(KeepUpwardScroll)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(top = 4.dp, bottom = 20.dp)
+                .navigationBarsPadding(),
+        ) {
+            if (onPick != null && !picked) {
+                Button(onClick = { Haptics.tick(context); onPick(); onDismiss() }, shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth()) {
+                    Text("Feed from this one")
+                }
+            }
+
+            val d = details
+            when {
+                d != null -> {
+                    DetailGroup("Status") {
+                        d.online?.let { DetailRow("Connection", if (it) "Online" else "Offline", if (it) palette.success else MaterialTheme.colorScheme.error) }
+                        d.foodLow?.let { DetailRow("Food", if (it) "Low" else "Enough", if (it) palette.warning else palette.success) }
+                        d.dispensing?.let { DetailRow("Dispenser", if (it) "Dispensing" else "Idle") }
+                        d.lidOpen?.let { DetailRow("Lid", if (it) "Open" else "Closed") }
+                        d.lidBlocked?.takeIf { it }?.let { DetailRow("Lid", "Blocked", MaterialTheme.colorScheme.error) }
+                        d.feedingPlanOn?.let { DetailRow("Petlibro schedule", if (it) "On" else "Off") }
+                    }
+                    DetailGroup("Power and Wi-Fi") {
+                        d.batteryPercent?.takeIf { it > 0 }?.let { DetailRow("Battery", "$it%") }
+                        // The feeder's backup batteries, as Petlibro reports them.
+                        d.batteryState?.let { DetailRow("Battery", it.lowercase().replace('_', ' ').replaceFirstChar { c -> c.uppercase() }) }
+                        d.wifiName?.let { DetailRow("Wi-Fi", it) }
+                        d.wifiRssi?.let { r ->
+                            val strength = when { r >= -55 -> "Excellent"; r >= -67 -> "Good"; r >= -75 -> "Fair"; else -> "Weak" }
+                            DetailRow("Signal", "$strength ($r dBm)")
+                        }
+                    }
+                    if (d.desiccantDaysLeft != null || d.desiccantCycleDays != null) {
+                        DetailGroup("Desiccant") {
+                            d.desiccantDaysLeft?.let {
+                                when {
+                                    it < 0 -> DetailRow("Change", "Overdue", palette.warning)
+                                    else -> DetailRow("Change in", if (it == 1) "1 day" else "$it days", if (it <= 3) palette.warning else null)
+                                }
+                            }
+                            d.desiccantCycleDays?.takeIf { it > 0 }?.let { DetailRow("Every", "$it days") }
+                        }
+                    }
+                }
+                error != null -> Notice(error!!, MaterialTheme.colorScheme.error)
+                else -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Text("Checking the feeder…", style = MaterialTheme.typography.bodyMedium, color = noteColor)
+                }
+            }
+
+            if (picked) {
+                DetailGroup("Today") {
+                    val t = today?.takeIf { it.isToday }
+                    t?.takeIf { it.eatingTimes >= 0 }?.let { DetailRow("${pets.singleOrNull() ?: "Pet"} ate", it.ateLabel()) }
+                    t?.takeIf { it.feedingTimes >= 0 }?.let { DetailRow("Meals out", "${it.feedingTimes}") }
+                    t?.takeIf { it.feedingPortions >= 0 }?.let { DetailRow("Portions", "${it.feedingPortions}") }
+                    if (pets.isNotEmpty()) DetailRow(if (pets.size == 1) "Pet" else "Pets", pets.joinToString())
+                }
+            }
+
+            DetailGroup("Device") {
+                DetailRow("Model", current.modelName)
+                DetailRow("Model number", current.model)
+                details?.firmware?.let { DetailRow("Firmware", it) }
+                details?.hardware?.let { DetailRow("Hardware", it) }
+                DetailRow("Serial", current.serial)
+                details?.mac?.let { DetailRow("MAC", it) }
+            }
+        }
+        }
+        }
+    }
+    if (renaming) {
+        var name by remember { mutableStateOf(current.label) }
+        AlertDialog(
+            onDismissRequest = { renaming = false },
+            title = { Text("Feeder name") },
+            text = {
+                GapColumn(8.dp) {
+                    AppField(name, { name = it.take(40) }, null, current.name, autoFocus = true)
+                    Text("Only PetBro uses this name. The Petlibro app keeps \"${current.name}\".", style = MaterialTheme.typography.bodySmall, color = noteColor)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    renaming = false
+                    Feeder.rename(context, current, name.takeIf { it.isNotBlank() && it.trim() != current.name })
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                Row {
+                    if (current.nickname != null) {
+                        TextButton(onClick = { renaming = false; Feeder.rename(context, current, null) }) { Text("Reset") }
+                    }
+                    TextButton(onClick = { renaming = false }) { Text("Cancel") }
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        )
+    }
+}
+
+/** Keeps scroll and fling left over at the end of a list from reaching the sheet around it. */
+private object KeepUpwardScroll : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+    override fun onPostScroll(consumed: androidx.compose.ui.geometry.Offset, available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource) =
+        if (available.y < 0) available else androidx.compose.ui.geometry.Offset.Zero
+
+    override suspend fun onPostFling(consumed: androidx.compose.ui.unit.Velocity, available: androidx.compose.ui.unit.Velocity) =
+        if (available.y < 0) available else androidx.compose.ui.unit.Velocity.Zero
+}
+
+/** A titled group of detail rows on a raised tile. */
+@Composable
+private fun DetailGroup(title: String, content: @Composable () -> Unit) {
+    Column {
+        Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(MaterialTheme.shapes.medium)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+        ) { content() }
+    }
+}
+
+@Composable
+private fun DetailRow(label: String, value: String, color: Color? = null) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = noteColor, modifier = Modifier.padding(end = 12.dp))
+        Spacer(Modifier.weight(1f))
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = color ?: MaterialTheme.colorScheme.onSurface, textAlign = androidx.compose.ui.text.style.TextAlign.End)
     }
 }
 

@@ -174,12 +174,27 @@ object Feeder {
             Session.saveDevices(context, devices)
             _stale.value = null
         }
+        @Suppress("NAME_SHADOWING")
+        val devices = devices.map { it.copy(nickname = Session.nickname(context, it.serial)) }
         val feeders = devices.filter { it.canFeed }
         // Keep the feeder picked before, if it's still on the account; else the only one there is.
         val saved = Session.feeder(context)
         val feeder = feeders.firstOrNull { it.serial == saved } ?: feeders.singleOrNull()
         Session.setFeeder(context, feeder?.serial)
         _account.value = AccountState.SignedIn(Session.email(context), devices, feeder)
+    }
+
+    /** Names the feeder in PetBro only; blank goes back to Petlibro's name. */
+    fun rename(context: Context, device: Device, name: String?) {
+        Session.setNickname(context, device.serial, name)
+        val nick = Session.nickname(context, device.serial)
+        (_account.value as? AccountState.SignedIn)?.let { a ->
+            _account.value = a.copy(
+                devices = a.devices.map { if (it.serial == device.serial) it.copy(nickname = nick) else it },
+                feeder = a.feeder?.let { if (it.serial == device.serial) it.copy(nickname = nick) else it },
+            )
+        }
+        FeedWidget.updateAll(context)
     }
 
     fun pickFeeder(context: Context, device: Device) {

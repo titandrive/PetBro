@@ -24,7 +24,22 @@ import javax.net.ssl.HttpsURLConnection
 class SessionExpired : IOException("Petlibro ended the session. Sign in again.")
 
 /** A device on the Petlibro account. */
-data class Device(val serial: String, val name: String, val model: String) {
+data class Device(
+    val serial: String,
+    /** The name in the Petlibro app. */
+    val name: String,
+    val model: String,
+    /** A name set in PetBro, shown instead of [name]; Petlibro never sees it. */
+    val nickname: String? = null,
+    /** Petlibro's name for the model, like "One RFID Smart Feeder". */
+    val product: String? = null,
+) {
+    /** The model as a name, falling back to its number. */
+    val modelName: String get() = product ?: if (model == FEEDER_MODEL) "One RFID Smart Feeder" else model
+
+    /** What PetBro calls it. */
+    val label: String get() = nickname ?: name
+
     /** Feeders whose manual feeding PetBro has been tested with. */
     val canFeed: Boolean get() = model == FEEDER_MODEL
 
@@ -32,6 +47,25 @@ data class Device(val serial: String, val name: String, val model: String) {
         const val FEEDER_MODEL = "PLAF301"
     }
 }
+
+/** What Petlibro reports about a feeder right now; null where it didn't say. */
+data class FeederDetails(
+    val online: Boolean?,
+    val foodLow: Boolean?,
+    val lidOpen: Boolean?,
+    val lidBlocked: Boolean?,
+    val dispensing: Boolean?,
+    val batteryState: String?,
+    val batteryPercent: Int?,
+    val wifiName: String?,
+    val wifiRssi: Int?,
+    val desiccantDaysLeft: Int?,
+    val desiccantCycleDays: Int?,
+    val feedingPlanOn: Boolean?,
+    val firmware: String?,
+    val hardware: String?,
+    val mac: String?,
+)
 
 /** Today's feeder numbers, for [day] (ISO date); -1 where Petlibro didn't say. */
 data class TodayStats(val day: String, val eatingTimes: Int, val feedingTimes: Int, val feedingPortions: Int, val eatingSeconds: Int = -1) {
@@ -83,6 +117,7 @@ object Petlibro {
                 serial = d.optString("deviceSn"),
                 name = d.optString("name", d.optString("deviceName", "Petlibro device")).ifBlank { "Petlibro device" },
                 model = d.optString("productIdentifier"),
+                product = d.optString("productName").takeIf { it.isNotBlank() && it != "null" },
             )
         }
     }
@@ -123,6 +158,35 @@ object Petlibro {
             val pet = list.optJSONObject(i) ?: return@mapNotNull null
             listOf("name", "petName", "nickname", "nickName").map { pet.optString(it) }.firstOrNull { it.isNotBlank() && it != "null" }
         }
+    }
+
+    /** Live status and device info, from the same two calls the Petlibro app's device page makes. */
+    fun details(token: String, serial: String): FeederDetails {
+        val body = { JSONObject().put("id", serial).put("deviceSn", serial) }
+        val real = request("/device/device/realInfo", body(), token) as? JSONObject ?: JSONObject()
+        val base = runCatching { request("/device/device/baseInfo", body(), token) as? JSONObject }.getOrNull() ?: JSONObject()
+        fun bool(o: JSONObject, k: String) = if (o.has(k) && !o.isNull(k)) o.optBoolean(k) else null
+        fun int(o: JSONObject, k: String) = if (o.has(k) && !o.isNull(k)) o.optDouble(k).takeIf { !it.isNaN() }?.toInt() else null
+        fun str(o: JSONObject, k: String) = o.optString(k).takeIf { it.isNotBlank() && it != "null" }
+        fun any(k: String) = if (real.has(k)) real else base
+        return FeederDetails(
+            online = bool(any("online"), "online"),
+            // surplusGrain is true while there's enough food.
+            foodLow = bool(real, "surplusGrain")?.not(),
+            lidOpen = bool(real, "barnDoorState"),
+            lidBlocked = bool(real, "barnDoorError"),
+            dispensing = str(real, "runningState")?.let { it == "RUNNING" },
+            batteryState = str(real, "batteryState"),
+            batteryPercent = int(real, "electricQuantity"),
+            wifiName = str(any("wifiSsid"), "wifiSsid"),
+            wifiRssi = int(any("wifiRssi"), "wifiRssi"),
+            desiccantDaysLeft = int(any("remainingDesiccantDays"), "remainingDesiccantDays"),
+            desiccantCycleDays = int(any("changeDesiccantFrequency"), "changeDesiccantFrequency"),
+            feedingPlanOn = bool(any("enableFeedingPlan"), "enableFeedingPlan"),
+            firmware = str(base, "softwareVersion") ?: str(real, "softwareVersion"),
+            hardware = str(base, "hardwareVersion") ?: str(real, "hardwareVersion"),
+            mac = str(any("mac"), "mac"),
+        )
     }
 
     fun feed(token: String, serial: String, portions: Int, requestId: String = UUID.randomUUID().toString()) {
@@ -214,7 +278,18 @@ object Session {
 
     fun setFeeder(context: Context, serial: String?) = prefs(context).edit().putString("feeder", serial).apply()
 
-    fun clear(context: Context) = prefs(context).edit().clear().apply()
+    fun clear(context: Context) {
+        // Nicknames are PetBro's own and outlast a sign-out.
+        val nicknames = prefs(context).all.filterKeys { it.startsWith("nick_") }
+        prefs(context).edit().clear().apply {
+            nicknames.forEach { (k, v) -> putString(k, v as? String) }
+        }.apply()
+    }
+
+    fun nickname(context: Context, serial: String): String? = prefs(context).getString("nick_$serial", null)
+
+    fun setNickname(context: Context, serial: String, name: String?) =
+        prefs(context).edit().apply { if (name.isNullOrBlank()) remove("nick_$serial") else putString("nick_$serial", name.trim()) }.apply()
 
     fun savePets(context: Context, names: List<String>) = prefs(context).edit().putString("pets", JSONArray(names).toString()).apply()
 
@@ -237,14 +312,16 @@ object Session {
 
     /** The account's devices as last read, so the app can show them before Petlibro answers. */
     fun saveDevices(context: Context, devices: List<Device>) {
-        val list = JSONArray(devices.map { JSONObject().put("serial", it.serial).put("name", it.name).put("model", it.model) })
+        val list = JSONArray(devices.map { JSONObject().put("serial", it.serial).put("name", it.name).put("model", it.model).put("product", it.product ?: JSONObject.NULL) })
         prefs(context).edit().putString("devices", list.toString()).apply()
     }
 
     fun devices(context: Context): List<Device>? = runCatching {
         val list = JSONArray(prefs(context).getString("devices", null) ?: return null)
         (0 until list.length()).map { i ->
-            list.getJSONObject(i).let { Device(it.getString("serial"), it.getString("name"), it.getString("model")) }
+            list.getJSONObject(i).let {
+                Device(it.getString("serial"), it.getString("name"), it.getString("model"), product = it.optString("product").takeIf { p -> p.isNotBlank() && p != "null" })
+            }
         }
     }.getOrNull()
 
