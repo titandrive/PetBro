@@ -64,16 +64,27 @@ The feeder's own settings, changed on the feeder through Petlibro:
 |---|---|
 | Petlibro schedule | The feeding plan kept on the feeder, on or off (with PetBro's schedule on too, both feed) |
 | Lid | Opens for your pet, stays open or stays closed; close speed; close after 1–10 seconds; open it now |
-| Sound and light | Sound, volume, indicator light |
+| Sound and light | Allow sound and Sound, volume, Allow light and Light (Petlibro has a master switch and an on/off switch for each) |
 | Display | Screen on or off, and an icon (heart, dog, cat, elk) or a few letters of text |
 | Safety | Child lock |
 | Desiccant | Change every 1–60 days, and reset the countdown after a change |
+| Petlibro notifications | Low battery, power change, outlet blocked and refill reminders, shown on or off (read only: there's no known way to change them outside the Petlibro app) |
+| Firmware | The version, whether an update is waiting, and installing it, with its progress |
 
 Changes go out as you make them, with no save button: switches and choices on the tap, volume when you let go of the slider, steppers half a second after the last tap, and display text when you tap **Show this text**. A change Petlibro refuses switches back, with a message. The last settings read show at once while fresh ones load (the refresh button beside light/dark spins).
 
 ## History
 
-Opened from the clock button in the Feeder header, or the Meals card. Every feed from the app, the schedule, the tile, shortcut, widget and automation, with its time, portions, where it came from and whether Petlibro accepted it (and why not). Kept on the phone (the last 200); **Clear** doesn't touch Petlibro's own log.
+Opened from the clock button in the Feeder header, or the Meals card. Every meal, newest first:
+
+- **From PetBro:** the app, the schedule, the tile, shortcut, widget and automation, with whether Petlibro accepted it (and why not). Kept on the phone (the last 200).
+- **From the feeder's own record** of the last week: meals from the Petlibro app, Petlibro's schedule or the feeder's button. A feeder record within three minutes of a PetBro feed of the same size is that feed, so nothing shows twice.
+
+"Last feed", today's counts and the widget include both. **Clear** empties PetBro's own list; the feeder's record still shows.
+
+## Feeder alerts
+
+Under **Settings → Feeder alerts** (on by default), PetBro checks the feeder about every half hour and notifies you when something new goes wrong: it's **offline**, **low on food**, its **lid is blocked**, or it reports an **error** (a stuck rotor, say, with the feeder's own message). Each problem notifies once when it starts. **Desiccant reminders** can be added (off by default). The check survives a reboot and stops when you sign out.
 
 ## Widget
 
@@ -126,6 +137,7 @@ Taps on the widget, tile and shortcut give one buzz. PetBro runs in the backgrou
   The sun/moon in each header flips light and dark; long-press it to follow the system.
 - **Feedback:** haptics on or off: ticks on toggles, choices and steppers, a buzz when feeding.
 - **Quick feed:** the portions a tap on the paw, the tile, the shortcut and automation give.
+- **Feeder alerts**, above.
 - **Widget look** and **Automation**, above.
 
 Everything is in JetBrains Mono, and times follow the phone's 12- or 24-hour setting.
@@ -137,13 +149,14 @@ Everything is in JetBrains Mono, and times follow the phone's 12- or 24-hour set
 | `MainActivity.kt` | Compose UI: the tabs, Feed Now, the Feeder tab and its details sheet, Schedule, History and Settings |
 | `Configure.kt` | The Configure tab: the feeder's own settings |
 | `Components.kt` | Shared controls: cards, switches, pill selectors, steppers, the theme picker and the clock dial |
-| `Petlibro.kt` | Petlibro's API calls (sign-in, devices, feeding, today's numbers, pets, details and settings), and the Keystore-encrypted session with everything it caches |
-| `Feeder.kt` | Account state, sign-in and background checks, feeding, the feed history and meal notifications |
+| `Petlibro.kt` | Petlibro's API calls (sign-in, devices, feeding, the feeder's meal record, today's numbers, pets, details, settings, problems and firmware), and the Keystore-encrypted session with everything it caches |
+| `Feeder.kt` | Account state, sign-in and background checks, feeding, the feed history (merged with the feeder's record) and meal notifications |
 | `Schedule.kt` | Meals, the exact alarm that serves them, and the receiver that resets it after a reboot |
 | `FeedNow.kt` | The tile, shortcut activity and automation receiver, and the key that keeps other apps from feeding |
 | `FeedWidget.kt` | The widget, its tap, its settings page and shared look |
 | `Prefs.kt` | App preferences: haptics, quick-feed portions, automation |
 | `Theme.kt` | Palettes, theme families and the type scale |
+| `Alerts.kt` | Feeder alerts: the half-hourly check and its notifications |
 | `Haptics.kt` | Vibration patterns |
 | `LucideIcons.kt` | Lucide icons |
 

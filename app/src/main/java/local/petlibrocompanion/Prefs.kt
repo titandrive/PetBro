@@ -12,6 +12,28 @@ object Prefs {
     private val _quick = MutableStateFlow(1)
     /** What a tap on Feed Now, the tile, the shortcut and automation feed. */
     val quickPortionsFlow: StateFlow<Int> = _quick
+    private val _alerts = MutableStateFlow(true)
+    /** Feeder alerts: a notification when the feeder goes offline, runs low, jams or errors. */
+    val alerts: StateFlow<Boolean> = _alerts
+    private val _desiccant = MutableStateFlow(false)
+    /** Whether feeder alerts include the desiccant falling due. */
+    val desiccant: StateFlow<Boolean> = _desiccant
+
+    fun alertsOn(context: Context) = prefs(context).getBoolean("alerts", true)
+
+    fun setAlerts(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("alerts", on).apply()
+        _alerts.value = on
+        FeederAlerts.schedule(context)
+    }
+
+    fun desiccantAlerts(context: Context) = prefs(context).getBoolean("desiccantAlerts", false)
+
+    fun setDesiccantAlerts(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("desiccantAlerts", on).apply()
+        _desiccant.value = on
+    }
+
     private val _automation = MutableStateFlow(false)
     /** Whether other apps may feed (by broadcast, or a shortcut made for them). */
     val automation: StateFlow<Boolean> = _automation
@@ -23,6 +45,8 @@ object Prefs {
         _haptics.value = p.getBoolean("haptics", true)
         _quick.value = quickPortions(context)
         _automation.value = automationOn(context)
+        _alerts.value = alertsOn(context)
+        _desiccant.value = desiccantAlerts(context)
     }
 
     fun haptics(context: Context) = prefs(context).getBoolean("haptics", true)

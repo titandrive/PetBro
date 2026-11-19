@@ -89,6 +89,9 @@
             </intent-filter>
         </activity>
 
+        <!-- The half-hourly feeder alert check. -->
+        <receiver android:name=".AlertReceiver" android:exported="false" />
+
         <!-- The meal alarm, and resetting it after a reboot or clock change. -->
         <receiver android:name=".MealReceiver" android:exported="false">
             <intent-filter>

@@ -52,6 +52,22 @@ fun ConfigureScreen() {
     }
     LaunchedEffect(serial) { reload() }
 
+    // A firmware update waiting for the feeder; checked with the settings.
+    var update by remember(serial) { mutableStateOf<FirmwareUpdate?>(null) }
+    var updateChecked by remember(serial) { mutableStateOf(false) }
+    var updating by remember(serial) { mutableStateOf(false) }
+    LaunchedEffect(serial, updating) {
+        val sn = serial ?: return@LaunchedEffect
+        val token = Session.token(context) ?: return@LaunchedEffect
+        // While updating, follow its progress until it's done (or for ten minutes).
+        repeat(if (updating) 120 else 1) {
+            val u = withContext(Dispatchers.IO) { runCatching { Petlibro.firmwareUpdate(token, sn) } }
+            u.onSuccess { update = it; updateChecked = true }
+            if (updating && u.getOrNull() == null && u.isSuccess) { updating = false; reload(); return@LaunchedEffect }
+            if (updating) kotlinx.coroutines.delay(5_000)
+        }
+    }
+
     /** Shows [new] at once, sends [change], and puts the old settings back if it fails. */
     fun apply(change: Setting, new: FeederConfig? = config, done: String? = null) {
         val sn = serial ?: return
@@ -103,7 +119,19 @@ fun ConfigureScreen() {
                         Text("Loading the feeder's settings…", style = MaterialTheme.typography.bodyMedium, color = noteColor)
                     }
                 }
-                else -> ConfigCards(c, error, ::apply)
+                else -> {
+                    ConfigCards(c, error, ::apply)
+                    FirmwareCard(c.firmware, update, updateChecked, updating) {
+                        val sn = serial ?: return@FirmwareCard
+                        val job = update?.jobItemId ?: return@FirmwareCard
+                        scope.launch {
+                            val token = Session.token(context)
+                            val r = withContext(Dispatchers.IO) { runCatching { Petlibro.startFirmwareUpdate(token!!, sn, job) } }
+                            r.onSuccess { updating = true; Toast.makeText(context, "Update started", Toast.LENGTH_SHORT).show() }
+                                .onFailure { Toast.makeText(context, it.message ?: "The update didn't start.", Toast.LENGTH_LONG).show() }
+                        }
+                    }
+                }
             }
             Spacer(Modifier.height(8.dp))
         }
@@ -157,6 +185,9 @@ private fun ConfigCards(c: FeederConfig, error: String?, apply: (Setting, Feeder
     }
 
     SectionCard("Sound and light", LucideVibrate, palette.tertiary) {
+        // Petlibro has two switches each for sound and light: a master one that allows it, and
+        // one that turns it on.
+        c.soundAllowed?.let { on -> SwitchRow("Allow sound", "Petlibro's master switch for sound", on) { apply(Setting.SoundAllowed(it), c.copy(soundAllowed = it), null) } }
         c.soundOn?.let { on -> SwitchRow("Sound", null, on) { apply(Setting.Sound(it), c.copy(soundOn = it), null) } }
         c.volume?.let { v ->
             var shown by remember(v) { mutableFloatStateOf(v.toFloat()) }
@@ -175,6 +206,7 @@ private fun ConfigCards(c: FeederConfig, error: String?, apply: (Setting, Feeder
                 valueRange = 1f..100f,
             )
         }
+        c.lightAllowed?.let { on -> SwitchRow("Allow light", "Petlibro's master switch for the indicator light", on) { apply(Setting.LightAllowed(it), c.copy(lightAllowed = it), null) } }
         c.lightOn?.let { on -> SwitchRow("Light", "The feeder's indicator light", on) { apply(Setting.Light(it), c.copy(lightOn = it), null) } }
     }
 
@@ -212,6 +244,28 @@ private fun ConfigCards(c: FeederConfig, error: String?, apply: (Setting, Feeder
 
     SectionCard("Safety", LucideKeyRound, palette.warning) {
         c.childLock?.let { on -> SwitchRow("Child lock", "Locks the feeder's buttons", on) { apply(Setting.ChildLock(it), c.copy(childLock = it), null) } }
+    }
+
+    val notices = listOf(
+        "Low battery" to c.noticeLowBattery,
+        "Power change" to c.noticePowerChange,
+        "Outlet blocked" to c.noticeOutletBlocked,
+        "Refill reminder" to c.noticeRefill,
+    ).filter { it.second != null }
+    if (notices.isNotEmpty()) {
+        SectionCard("Petlibro notifications", LucideBell, palette.secondary) {
+            Text(
+                "What the Petlibro app notifies you about for this feeder. Petlibro has no known way to change these from outside its app, so they're shown here only.",
+                style = MaterialTheme.typography.bodySmall,
+                color = noteColor,
+            )
+            notices.forEach { (label, on) ->
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                    Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    Text(if (on == true) "On" else "Off", style = MaterialTheme.typography.bodyMedium, color = if (on == true) palette.success else noteColor)
+                }
+            }
+        }
     }
 
     SectionCard("Desiccant", LucideRefreshCw, palette.success) {
@@ -255,5 +309,45 @@ private fun CountStepper(label: String, value: Int, range: IntRange, format: (In
             modifier = Modifier.width(96.dp),
         )
         RepeatButton(LucidePlus, "More", enabled = value < range.last) { onChange((value + 1).coerceAtMost(range.last)) }
+    }
+}
+
+/** The feeder's firmware, and an update when Petlibro has one, with its progress while it installs. */
+@Composable
+private fun FirmwareCard(current: String?, update: FirmwareUpdate?, checked: Boolean, updating: Boolean, onUpdate: () -> Unit) {
+    val context = LocalContext.current
+    val palette = LocalPalette.current
+    var confirming by remember { mutableStateOf(false) }
+    SectionCard("Firmware", LucideZap, palette.tertiary) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Version", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+            Text(current ?: "Unknown", style = MaterialTheme.typography.bodyMedium, color = noteColor)
+        }
+        when {
+            updating -> {
+                val p = update?.progress
+                Text(if (p != null) "Updating… $p%" else "Updating…", style = MaterialTheme.typography.bodyMedium, color = palette.secondary)
+                if (p != null) LinearProgressIndicator(progress = { p / 100f }, modifier = Modifier.fillMaxWidth())
+                else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text("Leave the feeder plugged in until it's done.", style = MaterialTheme.typography.bodySmall, color = noteColor)
+            }
+            update != null -> {
+                Text("Update available" + (update.version?.let { ": $it" } ?: ""), style = MaterialTheme.typography.bodyMedium, color = palette.warning)
+                update.notes?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = noteColor) }
+                Button(onClick = { Haptics.tick(context); confirming = true }, shape = MaterialTheme.shapes.extraLarge) { Text("Update the feeder") }
+            }
+            checked -> Text("Up to date", style = MaterialTheme.typography.bodyMedium, color = palette.success)
+            else -> Text("Checking for updates…", style = MaterialTheme.typography.bodySmall, color = noteColor)
+        }
+    }
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text("Update the feeder?") },
+            text = { Text("It may stop for a few minutes while it installs, so don't run it near a meal. Keep it plugged in.") },
+            confirmButton = { TextButton(onClick = { confirming = false; onUpdate() }) { Text("Update") } },
+            dismissButton = { TextButton(onClick = { confirming = false }) { Text("Cancel") } },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        )
     }
 }

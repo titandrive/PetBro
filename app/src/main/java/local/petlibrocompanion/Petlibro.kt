@@ -99,6 +99,15 @@ data class FeederConfig(
     val childLock: Boolean? = null,
     val lightOn: Boolean? = null,
     val soundOn: Boolean? = null,
+    /** Petlibro's master switches for light and sound, beside the on/off ones above. */
+    val lightAllowed: Boolean? = null,
+    val soundAllowed: Boolean? = null,
+    /** The Petlibro app's own notifications for this feeder (read only: there's no known call to change them). */
+    val noticeLowBattery: Boolean? = null,
+    val noticePowerChange: Boolean? = null,
+    val noticeOutletBlocked: Boolean? = null,
+    val noticeRefill: Boolean? = null,
+    val firmware: String? = null,
     val volume: Int? = null,
     val displayOn: Boolean? = null,
     /** "CUSTOM" opens when the pet comes; "KEEP_OPEN" stays open; "KEEP_CLOSE" stays closed. */
@@ -118,17 +127,25 @@ data class FeederConfig(
         set("volume", volume); set("displayOn", displayOn); set("lidMode", lidMode); set("lidSpeed", lidSpeed)
         set("lidCloseSec", lidCloseSec); set("desiccantEveryDays", desiccantEveryDays)
         set("displayText", displayText); set("displayIcon", displayIcon)
+        set("lightAllowed", lightAllowed); set("soundAllowed", soundAllowed)
+        set("noticeLowBattery", noticeLowBattery); set("noticePowerChange", noticePowerChange)
+        set("noticeOutletBlocked", noticeOutletBlocked); set("noticeRefill", noticeRefill); set("firmware", firmware)
         return o
     }
 
     companion object {
         fun fromJson(o: JSONObject): FeederConfig {
-            fun b(k: String) = if (o.isNull(k)) null else o.optBoolean(k)
-            fun i(k: String) = if (o.isNull(k)) null else o.optInt(k)
-            fun t(k: String) = if (o.isNull(k)) null else o.optString(k)
+            fun b(k: String) = if (!o.has(k) || o.isNull(k)) null else o.optBoolean(k)
+            fun i(k: String) = if (!o.has(k) || o.isNull(k)) null else o.optInt(k)
+            fun t(k: String) = if (!o.has(k) || o.isNull(k)) null else o.optString(k)
             return FeederConfig(
-                b("planOn"), b("childLock"), b("lightOn"), b("soundOn"), i("volume"), b("displayOn"),
-                t("lidMode"), t("lidSpeed"), i("lidCloseSec"), i("desiccantEveryDays"), t("displayText"), i("displayIcon"),
+                planOn = b("planOn"), childLock = b("childLock"), lightOn = b("lightOn"), soundOn = b("soundOn"),
+                lightAllowed = b("lightAllowed"), soundAllowed = b("soundAllowed"),
+                noticeLowBattery = b("noticeLowBattery"), noticePowerChange = b("noticePowerChange"),
+                noticeOutletBlocked = b("noticeOutletBlocked"), noticeRefill = b("noticeRefill"), firmware = t("firmware"),
+                volume = i("volume"), displayOn = b("displayOn"), lidMode = t("lidMode"), lidSpeed = t("lidSpeed"),
+                lidCloseSec = i("lidCloseSec"), desiccantEveryDays = i("desiccantEveryDays"),
+                displayText = t("displayText"), displayIcon = i("displayIcon"),
             )
         }
     }
@@ -151,12 +168,40 @@ data class TodayStats(val day: String, val eatingTimes: Int, val feedingTimes: I
     }
 }
 
+/** A meal the feeder dispensed. [kind] is Petlibro's event type, like MANUAL_FEEDING_SUCCESS. */
+data class FeederRecord(val time: Long, val portions: Int, val kind: String) {
+    fun toJson(): JSONObject = JSONObject().put("time", time).put("portions", portions).put("kind", kind)
+
+    /** Where Petlibro says it came from. */
+    val label: String get() = when {
+        kind.contains("PLAN") -> "Petlibro schedule"
+        kind.contains("MANUAL") -> "Petlibro app"
+        else -> "Feeder"
+    }
+
+    companion object {
+        fun fromJson(o: JSONObject) = FeederRecord(o.getLong("time"), o.optInt("portions"), o.optString("kind"))
+    }
+}
+
+data class FirmwareUpdate(val jobItemId: String, val version: String?, val notes: String?, val progress: Int?)
+
+data class FeederProblems(
+    val offline: Boolean,
+    val foodLow: Boolean,
+    val lidBlocked: Boolean,
+    val error: String?,
+    val desiccantDue: Boolean,
+)
+
 /** One change to the feeder's settings. */
 sealed interface Setting {
     data class Plan(val on: Boolean) : Setting
     data class ChildLock(val on: Boolean) : Setting
     data class Light(val on: Boolean) : Setting
     data class Sound(val on: Boolean) : Setting
+    data class LightAllowed(val on: Boolean) : Setting
+    data class SoundAllowed(val on: Boolean) : Setting
     data class Volume(val percent: Int) : Setting
     data class Display(val on: Boolean) : Setting
     /** Only the non-null parts change. */
@@ -289,6 +334,13 @@ object Petlibro {
             childLock = bool(real, "childLockSwitch"),
             lightOn = bool(real, "lightSwitch"),
             soundOn = bool(real, "soundSwitch"),
+            lightAllowed = bool(real, "enableLight"),
+            soundAllowed = bool(real, "enableSound"),
+            noticeLowBattery = bool(real, "enableLowBatteryNotice"),
+            noticePowerChange = bool(real, "enablePowerChangeNotice"),
+            noticeOutletBlocked = bool(real, "enableGrainOutletBlockedNotice"),
+            noticeRefill = bool(real, "enableReGrainNotice"),
+            firmware = str(base, "softwareVersion") ?: str(real, "softwareVersion"),
             volume = int(attr, "volume"),
             displayOn = bool(real, "screenDisplaySwitch"),
             lidMode = str(attr, "coverOpenMode"),
@@ -308,6 +360,8 @@ object Petlibro {
             is Setting.ChildLock -> { o.put("enable", change.on); "/device/setting/updateChildLockSwitch" }
             is Setting.Light -> { o.put("enable", change.on); "/device/setting/updateLightSwitch" }
             is Setting.Sound -> { o.put("enable", change.on); "/device/setting/updateSoundSwitch" }
+            is Setting.LightAllowed -> { o.put("enable", change.on); "/device/setting/updateLightEnableSwitch" }
+            is Setting.SoundAllowed -> { o.put("enable", change.on); "/device/setting/updateSoundEnableSwitch" }
             is Setting.Volume -> { o.put("volume", change.percent); "/device/setting/updateVolumeSetting" }
             is Setting.Display -> {
                 o.put("screenDisplayAgingType", 1).put("screenDisplayStartTime", JSONObject.NULL)
@@ -340,6 +394,57 @@ object Petlibro {
             }
         }
         request(path, o, token)
+    }
+
+    /**
+     * The feeder's own record of meals dispensed over the last [days] days, newest first: every
+     * meal, whether PetBro, the Petlibro app, Petlibro's schedule or the feeder's button sent it.
+     */
+    fun records(token: String, serial: String, days: Int = 7): List<FeederRecord> {
+        val now = System.currentTimeMillis()
+        val body = JSONObject().put("deviceSn", serial).put("startTime", now - days * 86_400_000L).put("endTime", now)
+            .put("size", 100).put("type", JSONArray().put("GRAIN_OUTPUT_SUCCESS"))
+        val data = request("/device/workRecord/list", body, token) as? JSONArray ?: return emptyList()
+        val out = mutableListOf<FeederRecord>()
+        fun take(r: JSONObject) {
+            val time = r.optLong("recordTime", 0L).takeIf { it > 0 } ?: return
+            out += FeederRecord(time, r.optInt("actualGrainNum", r.optInt("expectGrainNum", 0)), r.optString("eventType"))
+        }
+        for (i in 0 until data.length()) {
+            val day = data.optJSONObject(i) ?: continue
+            val records = day.optJSONArray("workRecords")
+            if (records != null) for (j in 0 until records.length()) records.optJSONObject(j)?.let(::take) else take(day)
+        }
+        return out.sortedByDescending { it.time }
+    }
+
+    /** A firmware update waiting for the feeder, or null when it's up to date. */
+    fun firmwareUpdate(token: String, serial: String): FirmwareUpdate? {
+        val d = request("/device/ota/getUpgrade", JSONObject().put("id", serial).put("deviceSn", serial), token) as? JSONObject ?: return null
+        val job = d.optString("jobItemId").takeIf { it.isNotBlank() && it != "null" } ?: return null
+        return FirmwareUpdate(
+            jobItemId = job,
+            version = d.optString("targetVersion").takeIf { it.isNotBlank() && it != "null" },
+            notes = d.optString("upgradeDesc").takeIf { it.isNotBlank() && it != "null" },
+            progress = if (d.has("progress") && !d.isNull("progress")) d.optInt("progress") else null,
+        )
+    }
+
+    fun startFirmwareUpdate(token: String, serial: String, jobItemId: String) {
+        request("/device/ota/doUpgrade", JSONObject().put("deviceSn", serial).put("jobItemId", jobItemId), token)
+    }
+
+    /** What's wrong with the feeder right now, from its status. */
+    fun problems(token: String, serial: String): FeederProblems {
+        val d = request("/data/data/realInfo", JSONObject().put("id", serial).put("deviceSn", serial), token) as? JSONObject ?: JSONObject()
+        val message = d.optString("exceptionMessage").takeIf { it.isNotBlank() && it != "null" }
+        return FeederProblems(
+            offline = d.has("online") && !d.optBoolean("online", true),
+            foodLow = d.has("surplusGrain") && !d.optBoolean("surplusGrain", true),
+            lidBlocked = d.optBoolean("barnDoorError", false) || d.optString("doorErrorState", "NORMAL").let { it.isNotBlank() && it != "NORMAL" && it != "null" },
+            error = message ?: if (d.optBoolean("errorState", false)) "The feeder reports an error." else null,
+            desiccantDue = d.optString("desiccantState") == "OVER_DUE",
+        )
     }
 
     fun feed(token: String, serial: String, portions: Int, requestId: String = UUID.randomUUID().toString()) {

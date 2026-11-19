@@ -77,6 +77,7 @@ class MainActivity : ComponentActivity() {
         WidgetPrefs.load(this)
         MealScheduler.reschedule(this)
         FeedNow.publishShortcut(this)
+        FeederAlerts.schedule(this)
         setContent {
             val mode by ThemeStore.mode.collectAsStateWithLifecycle()
             val family by ThemeStore.family.collectAsStateWithLifecycle()
@@ -765,7 +766,10 @@ private fun TodayCard(onOpenSchedule: () -> Unit, onOpenLog: () -> Unit) {
     val palette = LocalPalette.current
     val meals by Meals.meals.collectAsStateWithLifecycle()
     val on by Meals.enabled.collectAsStateWithLifecycle()
-    val log by FeedLog.entries.collectAsStateWithLifecycle()
+    val own by FeedLog.entries.collectAsStateWithLifecycle()
+    val feederLog by FeedLog.feeder.collectAsStateWithLifecycle()
+    // With the feeder's record, so a meal from the Petlibro app or its schedule counts too.
+    val log = remember(own, feederLog) { FeedLog.merge(own, feederLog) }
     val next = if (on) Meals.nextDue(meals) else null
     SectionCard("Meals", LucideCalendarClock, palette.secondary) {
         InfoRow(
@@ -1064,8 +1068,18 @@ private fun MealCard(meal: Meal, canRemove: Boolean, onChange: (Meal) -> Unit, o
 private fun LogScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val palette = LocalPalette.current
-    val entries by FeedLog.entries.collectAsStateWithLifecycle()
+    val own by FeedLog.entries.collectAsStateWithLifecycle()
+    val feederLog by FeedLog.feeder.collectAsStateWithLifecycle()
+    val entries = remember(own, feederLog) { FeedLog.merge(own, feederLog) }
     var confirmingClear by remember { mutableStateOf(false) }
+    // The feeder's own record of the week, fresh on opening.
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val token = Session.token(context)
+            val serial = Session.feeder(context)
+            if (token != null && serial != null) runCatching { Petlibro.records(token, serial) }.getOrNull()?.let { FeedLog.setFeeder(context, it) }
+        }
+    }
     ScreenColumn("History", onBack = onBack) {
         SectionCard(
             "Feeds",
@@ -1076,7 +1090,7 @@ private fun LogScreen(onBack: () -> Unit) {
             },
         ) {
             if (entries.isEmpty()) {
-                Text("Feeds from Feed Now, the schedule, the tile and automation show up here.", style = MaterialTheme.typography.bodySmall, color = noteColor)
+                Text("Every meal shows up here: from PetBro, and from the feeder's own record (the Petlibro app, its schedule or the feeder's button).", style = MaterialTheme.typography.bodySmall, color = noteColor)
             }
             entries.forEachIndexed { i, entry ->
                 if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -1088,7 +1102,7 @@ private fun LogScreen(onBack: () -> Unit) {
         AlertDialog(
             onDismissRequest = { confirmingClear = false },
             title = { Text("Clear history?") },
-            text = { Text("This only clears PetBro's list. The Petlibro app keeps its own feeding log.") },
+            text = { Text("This clears PetBro's own list. Meals in the feeder's record (the last week) still show.") },
             confirmButton = { TextButton(onClick = { confirmingClear = false; FeedLog.clear(context) }) { Text("Clear") } },
             dismissButton = { TextButton(onClick = { confirmingClear = false }) { Text("Cancel") } },
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -1118,7 +1132,11 @@ private fun LogRow(entry: FeedEntry) {
                 Text(whenLabel(entry.time), style = MaterialTheme.typography.bodySmall, color = noteColor)
             }
             Text(
-                entry.meal?.let { "${entry.source.label} · $it" } ?: entry.source.label,
+                when {
+                    entry.source == FeedSource.FEEDER -> entry.meal ?: entry.source.label
+                    entry.meal != null -> "${entry.source.label} · ${entry.meal}"
+                    else -> entry.source.label
+                },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1159,6 +1177,25 @@ private fun SettingsScreen() {
                     color = noteColor,
                 )
                 PortionStepper(quick) { Prefs.setQuickPortions(context, it) }
+            }
+
+            val alertsOn by Prefs.alerts.collectAsStateWithLifecycle()
+            val desiccantOn by Prefs.desiccant.collectAsStateWithLifecycle()
+            val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+            SectionCard("Feeder alerts", LucideBell, palette.warning) {
+                SwitchRow(
+                    "Alert me",
+                    "About every half hour, a notification when the feeder goes offline, runs low on food, its lid jams or it reports an error.",
+                    alertsOn,
+                ) {
+                    if (it && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    Prefs.setAlerts(context, it)
+                }
+                Reveal(alertsOn) {
+                    Column {
+                        SwitchRow("Desiccant reminders", "When the desiccant is due for a change", desiccantOn) { Prefs.setDesiccantAlerts(context, it) }
+                    }
+                }
             }
 
             WidgetLookCard()

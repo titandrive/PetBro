@@ -242,6 +242,7 @@ class MealReceiver : BroadcastReceiver() {
             MealScheduler.fire(context, intent, goAsync())
         } else {
             MealScheduler.reschedule(context)
+            FeederAlerts.schedule(context)
         }
     }
 }

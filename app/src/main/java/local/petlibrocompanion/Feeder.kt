@@ -87,7 +87,11 @@ object Feeder {
                     devices
                 }
             }
-            result.onSuccess { setDevices(app, it) }.onFailure {
+            result.onSuccess {
+                setDevices(app, it)
+                FeederAlerts.schedule(app)
+                refreshToday(app)
+            }.onFailure {
                 _account.value = AccountState.SignedOut
                 _error.value = message(it)
             }
@@ -163,6 +167,7 @@ object Feeder {
             Session.savePets(context, it)
             _pets.value = it
         }
+        runCatching { Petlibro.records(token, serial) }.getOrNull()?.let { FeedLog.setFeeder(context, it) }
         return runCatching { Petlibro.today(token, serial) }.getOrNull()?.also {
             Session.saveToday(context, it)
             _today.value = it
@@ -207,6 +212,7 @@ object Feeder {
         _account.value = AccountState.SignedOut
         _error.value = null
         MealScheduler.reschedule(context)
+        FeederAlerts.schedule(context)
     }
 
     /** Feed Now: dispenses [portions] and reports back in [onDone]. */
@@ -251,7 +257,9 @@ object Feeder {
 }
 
 enum class FeedSource(val label: String) {
-    MANUAL("Feed now"), SCHEDULED("Scheduled"), TEST("Test"), QUICK("Tile or shortcut"), AUTOMATION("Automation")
+    MANUAL("Feed now"), SCHEDULED("Scheduled"), TEST("Test"), QUICK("Tile or shortcut"), AUTOMATION("Automation"),
+    /** Only in the feeder's own record: the Petlibro app, Petlibro's schedule or the feeder's button. */
+    FEEDER("Feeder")
 }
 
 data class FeedEntry(
@@ -287,9 +295,39 @@ object FeedLog {
 
     private fun prefs(context: Context) = context.getSharedPreferences("feed-log", Context.MODE_PRIVATE)
 
+    private val _feeder = MutableStateFlow<List<FeederRecord>>(emptyList())
+    /** The feeder's own record of the last week's meals, as last read. */
+    val feeder: StateFlow<List<FeederRecord>> = _feeder
+
     fun init(context: Context) {
         _entries.value = load(context)
+        _feeder.value = loadFeeder(context)
     }
+
+    private fun loadFeeder(context: Context): List<FeederRecord> = runCatching {
+        val a = JSONArray(prefs(context).getString("feeder", "[]"))
+        (0 until a.length()).map { FeederRecord.fromJson(a.getJSONObject(it)) }
+    }.getOrDefault(emptyList())
+
+    fun setFeeder(context: Context, records: List<FeederRecord>) {
+        prefs(context).edit().putString("feeder", JSONArray(records.map { it.toJson() }).toString()).apply()
+        _feeder.value = records
+        FeedWidget.updateAll(context)
+    }
+
+    /**
+     * PetBro's feeds with the feeder's record merged in, newest first. A feeder record within
+     * three minutes of a PetBro feed of the same size is that feed; the rest went out some other way.
+     */
+    fun merge(own: List<FeedEntry>, feeder: List<FeederRecord>): List<FeedEntry> {
+        val window = 3 * 60_000L
+        val others = feeder.filter { r ->
+            own.none { it.ok && it.portions == r.portions && kotlin.math.abs(it.time - r.time) <= window }
+        }.map { FeedEntry(it.time, it.portions, FeedSource.FEEDER, ok = true, message = "", meal = it.label) }
+        return (own + others).sortedByDescending { it.time }
+    }
+
+    fun merged(context: Context): List<FeedEntry> = merge(load(context), loadFeeder(context))
 
     private fun load(context: Context): List<FeedEntry> = runCatching {
         val array = JSONArray(prefs(context).getString("entries", "[]"))
@@ -313,12 +351,12 @@ object FeedLog {
     }
 
     /** The last feed that went out, read fresh (the widget runs without the app). */
-    fun lastFed(context: Context): FeedEntry? = load(context).firstOrNull { it.ok }
+    fun lastFed(context: Context): FeedEntry? = merged(context).firstOrNull { it.ok }
 
     /** Today's feeds that went out, read fresh. */
     fun todayFed(context: Context): List<FeedEntry> {
         val start = java.time.LocalDate.now().atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
-        return load(context).filter { it.ok && it.time >= start }
+        return merged(context).filter { it.ok && it.time >= start }
     }
 }
 
