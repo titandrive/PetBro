@@ -320,7 +320,7 @@ class FeedWidgetReceiver : BroadcastReceiver() {
                 Feeder.init(app)
                 val entry = Feeder.dispense(app, portions, FeedSource.QUICK)
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    if (entry.ok) Haptics.finished(app)
+                    // One buzz on the tap is enough away from the app; the message says how it went.
                     Toast.makeText(app, if (entry.ok) "Dispensing ${portionsLabel(portions)}" else entry.message, Toast.LENGTH_SHORT).show()
                 }
             } finally {

@@ -64,7 +64,7 @@ object FeedNow {
                 Haptics.press(app)
                 toast(app, "Feeding ${portionsLabel(portions)}…")
                 Feeder.feedNow(app, portions, FeedSource.QUICK) { entry ->
-                    if (entry.ok) Haptics.finished(app)
+                    // One buzz on the tap is enough away from the app; the message says how it went.
                     toast(app, if (entry.ok) "Dispensing ${portionsLabel(entry.portions)}" else entry.message)
                 }
             }

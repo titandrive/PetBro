@@ -92,8 +92,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onPause() {
+        Haptics.appVisible = false
+        super.onPause()
+    }
+
     override fun onResume() {
         super.onResume()
+        Haptics.appVisible = true
         // Picks up a change to 24-hour time made while the app was in the background.
         Clock.load(this)
     }

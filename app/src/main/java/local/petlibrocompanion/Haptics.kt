@@ -30,15 +30,31 @@ object Haptics {
     /** Two strong pulses: a feed went through. */
     fun finished(context: Context) = vibrate(context, longArrayOf(0, 120, 110, 220), intArrayOf(0, 255, 0, 255))
 
+    /** Set while PetBro is on screen. */
+    @Volatile
+    var appVisible = false
+
     private fun vibrate(context: Context, timings: LongArray, amplitudes: IntArray) {
         if (!Prefs.haptics(context)) return
         val vibrator = vibrator(context) ?: return
+        // Phones without amplitude control just use the timings at their fixed strength.
+        val effect = if (vibrator.hasAmplitudeControl()) VibrationEffect.createWaveform(timings, amplitudes, -1)
+        else VibrationEffect.createWaveform(timings, -1)
         runCatching {
-            vibrator.vibrate(
-                // Phones without amplitude control just use the timings at their fixed strength.
-                if (vibrator.hasAmplitudeControl()) VibrationEffect.createWaveform(timings, amplitudes, -1)
-                else VibrationEffect.createWaveform(timings, -1)
-            )
+            if (appVisible) {
+                vibrator.vibrate(effect)
+            } else {
+                // From the widget, tile, shortcut or automation PetBro runs in the background,
+                // where Android drops ordinary vibrations. Notification vibrations still play.
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(
+                    effect,
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_EVENT)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build(),
+                )
+            }
         }
     }
 
