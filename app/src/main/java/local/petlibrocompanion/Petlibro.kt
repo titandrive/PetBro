@@ -65,7 +65,32 @@ data class FeederDetails(
     val firmware: String?,
     val hardware: String?,
     val mac: String?,
-)
+) {
+    fun toJson(): JSONObject {
+        val o = JSONObject()
+        // Nulls are kept as JSON nulls, so they read back as "Petlibro didn't say".
+        fun set(k: String, v: Any?) { o.put(k, v ?: JSONObject.NULL) }
+        set("online", online); set("foodLow", foodLow); set("lidOpen", lidOpen); set("lidBlocked", lidBlocked)
+        set("dispensing", dispensing); set("batteryState", batteryState); set("batteryPercent", batteryPercent)
+        set("wifiName", wifiName); set("wifiRssi", wifiRssi); set("desiccantDaysLeft", desiccantDaysLeft)
+        set("desiccantCycleDays", desiccantCycleDays); set("feedingPlanOn", feedingPlanOn)
+        set("firmware", firmware); set("hardware", hardware); set("mac", mac)
+        return o
+    }
+
+    companion object {
+        fun fromJson(o: JSONObject): FeederDetails {
+            fun b(k: String) = if (o.isNull(k)) null else o.optBoolean(k)
+            fun i(k: String) = if (o.isNull(k)) null else o.optInt(k)
+            fun t(k: String) = if (o.isNull(k)) null else o.optString(k)
+            return FeederDetails(
+                b("online"), b("foodLow"), b("lidOpen"), b("lidBlocked"), b("dispensing"), t("batteryState"), i("batteryPercent"),
+                t("wifiName"), i("wifiRssi"), i("desiccantDaysLeft"), i("desiccantCycleDays"), b("feedingPlanOn"),
+                t("firmware"), t("hardware"), t("mac"),
+            )
+        }
+    }
+}
 
 /** Today's feeder numbers, for [day] (ISO date); -1 where Petlibro didn't say. */
 data class TodayStats(val day: String, val eatingTimes: Int, val feedingTimes: Int, val feedingPortions: Int, val eatingSeconds: Int = -1) {
@@ -290,6 +315,13 @@ object Session {
 
     fun setNickname(context: Context, serial: String, name: String?) =
         prefs(context).edit().apply { if (name.isNullOrBlank()) remove("nick_$serial") else putString("nick_$serial", name.trim()) }.apply()
+
+    /** A feeder's details as last read, shown while fresh ones load. */
+    fun saveDetails(context: Context, serial: String, d: FeederDetails) =
+        prefs(context).edit().putString("details_$serial", d.toJson().toString()).apply()
+
+    fun details(context: Context, serial: String): FeederDetails? =
+        prefs(context).getString("details_$serial", null)?.let { runCatching { FeederDetails.fromJson(JSONObject(it)) }.getOrNull() }
 
     fun savePets(context: Context, names: List<String>) = prefs(context).edit().putString("pets", JSONArray(names).toString()).apply()
 

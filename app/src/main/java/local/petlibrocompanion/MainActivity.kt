@@ -538,14 +538,20 @@ private fun FeederSheet(device: Device, picked: Boolean, onPick: (() -> Unit)?, 
     // The latest copy, so a rename shows straight away.
     val current = (account as? AccountState.SignedIn)?.devices?.firstOrNull { it.serial == device.serial } ?: device
     var renaming by remember { mutableStateOf(false) }
-    var details by remember { mutableStateOf<FeederDetails?>(null) }
+    // Last time's details at once, then fresh ones in place, so nothing shifts as they arrive.
+    var details by remember { mutableStateOf(Session.details(context, device.serial)) }
     var error by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(true) }
     LaunchedEffect(device.serial) {
         val token = Session.token(context)
         val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching { Petlibro.details(token ?: throw java.io.IOException("Not signed in."), device.serial) }
         }
-        result.onSuccess { details = it }.onFailure { error = it.message ?: "Couldn't reach Petlibro." }
+        result.onSuccess {
+            details = it
+            Session.saveDetails(context, device.serial, it)
+        }.onFailure { error = it.message ?: "Couldn't reach Petlibro." }
+        loading = false
     }
     val today by Feeder.today.collectAsStateWithLifecycle()
     val pets by Feeder.pets.collectAsStateWithLifecycle()
@@ -565,6 +571,10 @@ private fun FeederSheet(device: Device, picked: Boolean, onPick: (() -> Unit)?, 
                         style = MaterialTheme.typography.bodySmall,
                         color = noteColor,
                     )
+                }
+                // Checking for fresh details; the saved ones stay up meanwhile.
+                if (loading && details != null) {
+                    CircularProgressIndicator(Modifier.padding(end = 12.dp).size(18.dp), strokeWidth = 2.dp)
                 }
                 FilledTonalIconButton(onClick = { Haptics.tick(context); renaming = true }) {
                     Icon(LucidePencil, contentDescription = "Rename feeder", modifier = Modifier.size(18.dp))
@@ -590,6 +600,7 @@ private fun FeederSheet(device: Device, picked: Boolean, onPick: (() -> Unit)?, 
             }
 
             val d = details
+            if (d != null && error != null) Notice("Showing saved details. ${error!!}", MaterialTheme.colorScheme.error)
             when {
                 d != null -> {
                     DetailGroup("Status") {
@@ -600,10 +611,10 @@ private fun FeederSheet(device: Device, picked: Boolean, onPick: (() -> Unit)?, 
                         d.lidBlocked?.takeIf { it }?.let { DetailRow("Lid", "Blocked", MaterialTheme.colorScheme.error) }
                         d.feedingPlanOn?.let { DetailRow("Petlibro schedule", if (it) "On" else "Off") }
                     }
-                    DetailGroup("Power and Wi-Fi") {
+                    DetailGroup("Battery and Wi-Fi") {
                         d.batteryPercent?.takeIf { it > 0 }?.let { DetailRow("Battery", "$it%") }
-                        // The feeder's backup batteries, as Petlibro reports them.
-                        d.batteryState?.let { DetailRow("Battery", it.lowercase().replace('_', ' ').replaceFirstChar { c -> c.uppercase() }) }
+                        // The feeder's backup batteries (it runs on its adapter), as Petlibro reports them.
+                        d.batteryState?.let { DetailRow("Backup battery", it.lowercase().replace('_', ' ').replaceFirstChar { c -> c.uppercase() }) }
                         d.wifiName?.let { DetailRow("Wi-Fi", it) }
                         d.wifiRssi?.let { r ->
                             val strength = when { r >= -55 -> "Excellent"; r >= -67 -> "Good"; r >= -75 -> "Fair"; else -> "Weak" }
@@ -623,10 +634,18 @@ private fun FeederSheet(device: Device, picked: Boolean, onPick: (() -> Unit)?, 
                     }
                 }
                 error != null -> Notice(error!!, MaterialTheme.colorScheme.error)
-                else -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(12.dp))
-                    Text("Checking the feeder…", style = MaterialTheme.typography.bodyMedium, color = noteColor)
+                // Nothing saved yet: the rows in their places, filled in as Petlibro answers.
+                else -> {
+                    val wait = "Loading…"
+                    DetailGroup("Status") {
+                        listOf("Connection", "Food", "Dispenser", "Lid", "Petlibro schedule").forEach { DetailRow(it, wait, noteColor) }
+                    }
+                    DetailGroup("Battery and Wi-Fi") {
+                        listOf("Backup battery", "Wi-Fi", "Signal").forEach { DetailRow(it, wait, noteColor) }
+                    }
+                    DetailGroup("Desiccant") {
+                        listOf("Change in", "Every").forEach { DetailRow(it, wait, noteColor) }
+                    }
                 }
             }
 
