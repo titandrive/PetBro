@@ -116,6 +116,17 @@ private val timeFormat: DateTimeFormatter get() = Clock.format
 private val dayFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM")
 
 /** "Today, 8:00 AM", "Tomorrow, …" or "Tue 18 Nov, …". */
+/** "today at 8:00", "tomorrow at 8:00" or "Tue 18 Nov at 8:00", for the middle of a sentence. */
+private fun whenPhrase(time: LocalDateTime): String {
+    val today = LocalDate.now()
+    val day = when (time.toLocalDate()) {
+        today -> "today"
+        today.plusDays(1) -> "tomorrow"
+        else -> time.format(dayFormat)
+    }
+    return "$day at ${time.toLocalTime().format(timeFormat)}"
+}
+
 private fun whenLabel(time: LocalDateTime): String {
     val today = LocalDate.now()
     val day = when (time.toLocalDate()) {
@@ -898,7 +909,7 @@ private fun ScheduleScreen() {
                     }
                     if (summary) Text(
                         if (next == null) "No meals coming up"
-                        else "Next: ${next.second.joinToString { it.name }} at ${whenLabel(next.first)}",
+                        else "Next meal: ${next.second.joinToString { it.name }}, ${whenPhrase(next.first)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = if (next == null) MaterialTheme.colorScheme.error else palette.secondary,
                     )
@@ -1010,7 +1021,7 @@ private fun MealCard(meal: Meal, canRemove: Boolean, onChange: (Meal) -> Unit, o
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val next = meal.nextRun()
                     Text(
-                        if (next == null) "Pick at least one day" else "Next at ${whenLabel(next)}",
+                        if (next == null) "Pick at least one day" else "Next: ${whenPhrase(next)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = if (next == null) MaterialTheme.colorScheme.error else palette.secondary,
                         modifier = Modifier.weight(1f),
