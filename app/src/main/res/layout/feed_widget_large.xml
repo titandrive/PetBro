@@ -33,7 +33,8 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
         android:scaleType="centerInside" />
-    <View
+    <!-- A FrameLayout, not a plain View: widgets can only use certain view classes. -->
+    <FrameLayout
         android:id="@+id/widget_divider"
         android:layout_width="48dp"
         android:layout_height="1dp"

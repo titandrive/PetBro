@@ -189,7 +189,7 @@ class FeedWidget : AppWidgetProvider() {
                     }
                     val sub = when {
                         feeding -> "Feeding…"
-                        showLast && look.tapFeeds -> "Tap to feed $portions"
+                        showLast && look.tapFeeds -> "Tap to feed"
                         showLast -> portionsLabel(last!!.portions)
                         else -> portionsLabel(portions)
                     }
