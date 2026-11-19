@@ -902,8 +902,8 @@ private fun ScheduleScreen() {
             val exactOff = !exactOk && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
             // With one meal its own card says when it's next, so the summary only shows for two
             // or more (or when nothing's coming up). Nothing to show, nothing taking up room.
-            // Only when nothing's coming up: otherwise the next meal's own card says so.
-            val summary = next == null
+            // With two or more meals, which is next; with one, its card says.
+            val summary = next == null || meals.count { it.enabled } > 1
             Reveal(on && (signedOut || !backgroundOk || exactOff || summary)) {
                 GapColumn(12.dp, modifier = Modifier.padding(top = 4.dp)) {
                     if (signedOut) {
@@ -919,7 +919,7 @@ private fun ScheduleScreen() {
                     }
                     if (summary) Text(
                         if (next == null) "No meals coming up"
-                        else "Next meal: ${next.second.joinToString { it.name }}, ${whenPhrase(next.first)}",
+                        else "Next meal: ${next.second.first().name} ${whenPhrase(next.first)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = if (next == null) MaterialTheme.colorScheme.error else palette.secondary,
                     )
@@ -930,7 +930,7 @@ private fun ScheduleScreen() {
         Reveal(on) {
             GapColumn(16.dp) {
                 meals.sortedBy { it.hour * 60 + it.minute }.forEach { meal ->
-                    MealCard(meal, isNext = Meals.nextDue(meals)?.second?.any { it.id == meal.id } == true, canRemove = meals.size > 1, onChange = ::update) {
+                    MealCard(meal, canRemove = meals.size > 1, onChange = ::update) {
                         Meals.set(context, meals.filterNot { it.id == meal.id })
                     }
                 }
@@ -976,7 +976,7 @@ private fun ScheduleScreen() {
 /** One meal: on or off, how it repeats, its time and portions, as PurgeBot's scheduled purge card. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MealCard(meal: Meal, isNext: Boolean, canRemove: Boolean, onChange: (Meal) -> Unit, onRemove: () -> Unit) {
+private fun MealCard(meal: Meal, canRemove: Boolean, onChange: (Meal) -> Unit, onRemove: () -> Unit) {
     val context = LocalContext.current
     val palette = LocalPalette.current
     var pickingTime by remember { mutableStateOf(false) }
@@ -1031,12 +1031,7 @@ private fun MealCard(meal: Meal, isNext: Boolean, canRemove: Boolean, onChange: 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val next = meal.nextRun()
                     Text(
-                        // Only the next meal of all says when; others stay quiet.
-                        when {
-                            next == null -> "Pick at least one day"
-                            isNext -> "Next meal: ${whenPhrase(next)}"
-                            else -> ""
-                        },
+                        if (next == null) "Pick at least one day" else "Next: ${whenPhrase(next)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = if (next == null) MaterialTheme.colorScheme.error else palette.secondary,
                         modifier = Modifier.weight(1f),
