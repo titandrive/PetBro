@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Catppuccin Macchiato: the icon keeps the dark look in both themes. -->
+    <color name="icon_background">#FF24273A</color>
+    <color name="logo">#FFF5A97F</color>
+    <!-- Window background, matching the app's Latte background. -->
+    <color name="window_background">#FFE6E9EF</color>
+</resources>

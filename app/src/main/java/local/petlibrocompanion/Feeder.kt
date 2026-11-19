@@ -1,0 +1,248 @@
+package local.petlibrocompanion
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.IOException
+
+/** Where the account stands, for the screens. */
+sealed interface AccountState {
+    data object SignedOut : AccountState
+    data class Checking(val message: String) : AccountState
+    data class SignedIn(val email: String?, val devices: List<Device>, val feeder: Device?) : AccountState
+    /** Saved sign-in that couldn't be checked (no network, say): feeding may still work. */
+    data class Offline(val email: String?, val message: String) : AccountState
+}
+
+/** The account and feeder, shared by every screen. */
+object Feeder {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    private val _account = MutableStateFlow<AccountState>(AccountState.SignedOut)
+    val account: StateFlow<AccountState> = _account
+
+    /** A sign-in problem to show under the form. */
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error
+
+    private val _feeding = MutableStateFlow(false)
+    val feeding: StateFlow<Boolean> = _feeding
+
+    private var started = false
+
+    /** Restores a saved sign-in once per process. */
+    fun init(context: Context) {
+        if (started) return
+        started = true
+        FeedLog.init(context)
+        if (Session.hasToken(context)) refresh(context.applicationContext)
+    }
+
+    /** True when Feed Now can go: signed in with a feeder picked. */
+    fun ready(context: Context) = Session.hasToken(context) && Session.feeder(context) != null
+
+    fun signIn(context: Context, email: String, password: String) {
+        val app = context.applicationContext
+        _error.value = null
+        _account.value = AccountState.Checking("Signing in…")
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val token = Petlibro.login(email, password)
+                    val devices = Petlibro.devices(token)
+                    if (!Session.saveToken(app, token)) throw IOException("The sign-in couldn't be saved.")
+                    Session.setEmail(app, email)
+                    devices
+                }
+            }
+            result.onSuccess { setDevices(app, it) }.onFailure {
+                _account.value = AccountState.SignedOut
+                _error.value = message(it)
+            }
+        }
+    }
+
+    /** Re-reads the account's devices with the saved session. */
+    fun refresh(context: Context) {
+        val app = context.applicationContext
+        _account.value = AccountState.Checking("Checking Petlibro…")
+        scope.launch {
+            val token = Session.token(app)
+            if (token == null) {
+                Session.clear(app)
+                _account.value = AccountState.SignedOut
+                _error.value = "The saved sign-in couldn't be restored. Sign in again."
+                return@launch
+            }
+            val result = withContext(Dispatchers.IO) { runCatching { Petlibro.devices(token) } }
+            result.onSuccess { setDevices(app, it) }.onFailure {
+                if (it is SessionExpired) {
+                    signOut(app)
+                    _error.value = message(it)
+                } else {
+                    _account.value = AccountState.Offline(Session.email(app), message(it))
+                }
+            }
+        }
+    }
+
+    private fun setDevices(context: Context, devices: List<Device>) {
+        val feeders = devices.filter { it.canFeed }
+        // Keep the feeder picked before, if it's still on the account; else the only one there is.
+        val saved = Session.feeder(context)
+        val feeder = feeders.firstOrNull { it.serial == saved } ?: feeders.singleOrNull()
+        Session.setFeeder(context, feeder?.serial)
+        _account.value = AccountState.SignedIn(Session.email(context), devices, feeder)
+    }
+
+    fun pickFeeder(context: Context, device: Device) {
+        Session.setFeeder(context, device.serial)
+        (_account.value as? AccountState.SignedIn)?.let { _account.value = it.copy(feeder = device) }
+    }
+
+    fun signOut(context: Context) {
+        Session.clear(context)
+        _account.value = AccountState.SignedOut
+        _error.value = null
+        MealScheduler.reschedule(context)
+    }
+
+    /** Feed Now: dispenses [portions] and reports back in [onDone]. */
+    fun feedNow(context: Context, portions: Int, onDone: (FeedEntry) -> Unit) {
+        if (_feeding.value) return
+        val app = context.applicationContext
+        _feeding.value = true
+        scope.launch {
+            val entry = withContext(Dispatchers.IO) { dispense(app, portions, FeedSource.MANUAL) }
+            _feeding.value = false
+            if (entry.message.contains("Sign in again")) signOut(app)
+            onDone(entry)
+        }
+    }
+
+    /**
+     * Sends one feed with the saved session and logs it. Blocking: call it off the main thread.
+     * Used by Feed Now, scheduled meals and the test.
+     */
+    fun dispense(context: Context, portions: Int, source: FeedSource, requestId: String? = null, meal: String? = null): FeedEntry {
+        val token = Session.token(context)
+        val serial = Session.feeder(context)
+        val (ok, message) = when {
+            token == null -> false to "Not signed in. Sign in again."
+            serial == null -> false to "No feeder picked."
+            else -> try {
+                if (requestId != null) Petlibro.feed(token, serial, portions, requestId) else Petlibro.feed(token, serial, portions)
+                true to "Petlibro accepted the request."
+            } catch (e: SessionExpired) {
+                false to "Petlibro ended the session. Sign in again."
+            } catch (e: Exception) {
+                false to "Couldn't confirm the feed. Check the feeder's log."
+            }
+        }
+        return FeedLog.add(context, FeedEntry(System.currentTimeMillis(), portions, source, ok, message, meal))
+    }
+
+    private fun message(e: Throwable): String = when (e) {
+        is IOException -> e.message ?: "Couldn't reach Petlibro."
+        else -> "Petlibro returned an unexpected response."
+    }
+}
+
+enum class FeedSource(val label: String) { MANUAL("Feed now"), SCHEDULED("Scheduled"), TEST("Test") }
+
+data class FeedEntry(
+    val time: Long,
+    val portions: Int,
+    val source: FeedSource,
+    val ok: Boolean,
+    val message: String,
+    /** The meal's name, for scheduled feeds. */
+    val meal: String? = null,
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("time", time).put("portions", portions).put("source", source.name)
+        .put("ok", ok).put("message", message).put("meal", meal ?: JSONObject.NULL)
+
+    companion object {
+        fun fromJson(o: JSONObject) = FeedEntry(
+            time = o.getLong("time"),
+            portions = o.optInt("portions", 1),
+            source = FeedSource.entries.firstOrNull { it.name == o.optString("source") } ?: FeedSource.MANUAL,
+            ok = o.optBoolean("ok"),
+            message = o.optString("message"),
+            meal = o.optString("meal").takeIf { it.isNotEmpty() && it != "null" },
+        )
+    }
+}
+
+/** The last [LIMIT] feeds, newest first. */
+object FeedLog {
+    private const val LIMIT = 200
+    private val _entries = MutableStateFlow<List<FeedEntry>>(emptyList())
+    val entries: StateFlow<List<FeedEntry>> = _entries
+
+    private fun prefs(context: Context) = context.getSharedPreferences("feed-log", Context.MODE_PRIVATE)
+
+    fun init(context: Context) {
+        _entries.value = load(context)
+    }
+
+    private fun load(context: Context): List<FeedEntry> = runCatching {
+        val array = JSONArray(prefs(context).getString("entries", "[]"))
+        (0 until array.length()).map { FeedEntry.fromJson(array.getJSONObject(it)) }
+    }.getOrDefault(emptyList())
+
+    @Synchronized
+    fun add(context: Context, entry: FeedEntry): FeedEntry {
+        // Read back first: a receiver may have logged one in another process start.
+        val all = (listOf(entry) + load(context)).take(LIMIT)
+        prefs(context).edit().putString("entries", JSONArray(all.map { it.toJson() }).toString()).commit()
+        _entries.value = all
+        return entry
+    }
+
+    fun clear(context: Context) {
+        prefs(context).edit().clear().apply()
+        _entries.value = emptyList()
+    }
+}
+
+/** A notification when a scheduled meal goes out, or doesn't. */
+object FeedNotifications {
+    private const val CHANNEL = "meals"
+    private const val ID = 1
+
+    fun meal(context: Context, entry: FeedEntry) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Scheduled meals", NotificationManager.IMPORTANCE_DEFAULT))
+        val open = PendingIntent.getActivity(
+            context, 0,
+            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE,
+        )
+        val title = (entry.meal ?: "Meal") + if (entry.ok) " served" else " not confirmed"
+        val text = "${portionsLabel(entry.portions)}. ${entry.message}"
+        val notification = android.app.Notification.Builder(context, CHANNEL)
+            .setSmallIcon(R.drawable.ic_logo)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(android.app.Notification.BigTextStyle().bigText(text))
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        runCatching { manager.notify(ID, notification) }
+    }
+}
+
+fun portionsLabel(n: Int) = if (n == 1) "1 portion" else "$n portions"
