@@ -76,7 +76,13 @@ import java.util.Locale
 /** A screen's title row: the logo, the title, the light/dark button and an optional control. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun Header(title: String, modeToggle: Boolean = true, action: (@Composable () -> Unit)? = null) {
+fun Header(
+    title: String,
+    modeToggle: Boolean = true,
+    /** A back arrow in place of the logo, for a screen opened over a tab. */
+    onBack: (() -> Unit)? = null,
+    action: (@Composable () -> Unit)? = null,
+) {
     val context = LocalContext.current
     val palette = LocalPalette.current
     val haptics = LocalHapticFeedback.current
@@ -89,12 +95,18 @@ fun Header(title: String, modeToggle: Boolean = true, action: (@Composable () ->
             .statusBarsPadding()
             .padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 12.dp),
     ) {
-        Icon(
-            painterResource(R.drawable.ic_logo),
-            contentDescription = null,
-            tint = palette.warning,
-            modifier = Modifier.size(46.dp).padding(end = 10.dp, top = 6.dp, bottom = 6.dp),
-        )
+        if (onBack != null) {
+            IconButton(onClick = { Haptics.tick(context); onBack() }, modifier = Modifier.padding(end = 4.dp)) {
+                Icon(LucideArrowLeft, contentDescription = "Back")
+            }
+        } else {
+            Icon(
+                painterResource(R.drawable.ic_logo),
+                contentDescription = null,
+                tint = palette.warning,
+                modifier = Modifier.size(46.dp).padding(end = 10.dp, top = 6.dp, bottom = 6.dp),
+            )
+        }
         val titleStyle = MaterialTheme.typography.headlineMedium
         BasicText(
             title,
@@ -217,7 +229,9 @@ fun <T> PillSegmented(
     onSelect: (T) -> Unit,
 ) {
     val context = LocalContext.current
-    val index = options.indexOf(selected).coerceAtLeast(0)
+    // A value that isn't one of the options (one the feeder reports that PetBro doesn't know)
+    // highlights nothing, rather than a pill behind text that isn't marked selected.
+    val index = options.indexOf(selected)
     BoxWithConstraints(
         modifier
             .height(44.dp)
@@ -226,15 +240,17 @@ fun <T> PillSegmented(
             .padding(4.dp),
     ) {
         val segment = maxWidth / options.size
-        val offset by animateDpAsState(segment * index, label = "pill")
-        Box(
-            Modifier
-                .offset(x = offset)
-                .width(segment)
-                .fillMaxHeight()
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary)
-        )
+        val offset by animateDpAsState(segment * index.coerceAtLeast(0), label = "pill")
+        if (index >= 0) {
+            Box(
+                Modifier
+                    .offset(x = offset)
+                    .width(segment)
+                    .fillMaxHeight()
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary)
+            )
+        }
         Row(Modifier.fillMaxSize()) {
             options.forEach { option ->
                 val on = option == selected

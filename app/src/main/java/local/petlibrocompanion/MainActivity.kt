@@ -18,6 +18,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -107,7 +108,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /** The app's four places, along the bottom, with Feed Now in the middle. */
-private enum class Tab(val label: String) { HOME("Feeder"), SCHEDULE("Schedule"), LOG("History"), SETTINGS("Settings") }
+private enum class Tab(val label: String) { HOME("Feeder"), SCHEDULE("Schedule"), CONFIGURE("Configure"), SETTINGS("Settings") }
 
 /** Times as the phone shows them: 24-hour or AM/PM, as set in Android's clock settings. */
 private val timeFormat: DateTimeFormatter get() = Clock.format
@@ -138,7 +139,10 @@ private fun App() {
     val ready = (account as? AccountState.SignedIn)?.feeder != null ||
         (account is AccountState.Offline && Feeder.ready(context))
 
-    BackHandler(enabled = tab != Tab.HOME) { tab = Tab.HOME }
+    // History opens over the Feeder tab, from the Meals card.
+    var historyOpen by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = historyOpen) { historyOpen = false }
+    BackHandler(enabled = tab != Tab.HOME && !historyOpen) { tab = Tab.HOME }
 
     // Tabs sit side by side, so a sideways swipe moves between them, as in PurgeBot.
     val pager = rememberPagerState(initialPage = tab.ordinal) { Tab.entries.size }
@@ -182,7 +186,10 @@ private fun App() {
                             else -> feed(context, Prefs.quickPortions(context))
                         }
                     },
-                    onSelect = { tab = it },
+                    onSelect = {
+                        historyOpen = false
+                        tab = it
+                    },
                 )
             },
         ) { padding ->
@@ -198,9 +205,16 @@ private fun App() {
                     verticalAlignment = Alignment.Top,
                 ) { page ->
                     when (Tab.entries[page]) {
-                        Tab.HOME -> HomeScreen(onOpenSchedule = { tab = Tab.SCHEDULE }, onOpenLog = { tab = Tab.LOG })
+                        Tab.HOME -> androidx.compose.animation.AnimatedContent(
+                            historyOpen,
+                            transitionSpec = { androidx.compose.animation.fadeIn() togetherWith androidx.compose.animation.fadeOut() },
+                            label = "history",
+                        ) { open ->
+                            if (open) LogScreen(onBack = { historyOpen = false })
+                            else HomeScreen(onOpenSchedule = { tab = Tab.SCHEDULE }, onOpenLog = { historyOpen = true })
+                        }
                         Tab.SCHEDULE -> ScheduleScreen()
-                        Tab.LOG -> LogScreen()
+                        Tab.CONFIGURE -> ConfigureScreen()
                         Tab.SETTINGS -> SettingsScreen()
                     }
                 }
@@ -241,7 +255,7 @@ private fun TabBar(selected: Tab, scheduled: Boolean, feed: FeedState, onFeed: (
         ) {
             Tab.entries.forEach { tab ->
                 // Room in the middle for Feed Now.
-                if (tab == Tab.LOG) Spacer(Modifier.width(82.dp))
+                if (tab == Tab.CONFIGURE) Spacer(Modifier.width(82.dp))
                 val on = tab == selected
                 val tint = if (on) palette.mauve else MaterialTheme.colorScheme.onSurfaceVariant
                 Box(
@@ -263,7 +277,7 @@ private fun TabBar(selected: Tab, scheduled: Boolean, feed: FeedState, onFeed: (
                         Tab.SCHEDULE -> BadgedBox(badge = { if (scheduled) Badge(containerColor = palette.success) }) {
                             Icon(LucideCalendarClock, contentDescription = tab.label, tint = tint, modifier = Modifier.size(24.dp))
                         }
-                        Tab.LOG -> Icon(LucideHistory, contentDescription = tab.label, tint = tint, modifier = Modifier.size(24.dp))
+                        Tab.CONFIGURE -> Icon(LucideSlidersHorizontal, contentDescription = tab.label, tint = tint, modifier = Modifier.size(24.dp))
                         Tab.SETTINGS -> Icon(LucideSettings, contentDescription = tab.label, tint = tint, modifier = Modifier.size(24.dp))
                     }
                 }
@@ -368,13 +382,14 @@ private fun FeedSheet(onDismiss: () -> Unit) {
 private fun ScreenColumn(
     title: String,
     header: (@Composable () -> Unit)? = null,
+    onBack: (() -> Unit)? = null,
     /** Room between cards; the home page runs tighter so it fits on one screen. */
     gap: androidx.compose.ui.unit.Dp = 16.dp,
     content: @Composable () -> Unit,
 ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        topBar = { Header(title, action = header) },
+        topBar = { Header(title, modeToggle = onBack == null, onBack = onBack, action = header) },
     ) { padding ->
         GapColumn(
             gap,
@@ -1036,12 +1051,12 @@ private fun MealCard(meal: Meal, canRemove: Boolean, onChange: (Meal) -> Unit, o
 // ---------------------------------------------------------------- History
 
 @Composable
-private fun LogScreen() {
+private fun LogScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val palette = LocalPalette.current
     val entries by FeedLog.entries.collectAsStateWithLifecycle()
     var confirmingClear by remember { mutableStateOf(false) }
-    ScreenColumn("History") {
+    ScreenColumn("History", onBack = onBack) {
         SectionCard(
             "Feeds",
             LucideHistory,

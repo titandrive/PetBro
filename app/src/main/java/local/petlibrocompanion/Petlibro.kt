@@ -92,6 +92,48 @@ data class FeederDetails(
     }
 }
 
+/** The feeder's own settings, as Petlibro reports them; null where it didn't say. */
+data class FeederConfig(
+    /** The feeder's own feeding plan (set in the Petlibro app). */
+    val planOn: Boolean? = null,
+    val childLock: Boolean? = null,
+    val lightOn: Boolean? = null,
+    val soundOn: Boolean? = null,
+    val volume: Int? = null,
+    val displayOn: Boolean? = null,
+    /** "CUSTOM" opens when the pet comes; "KEEP_OPEN" stays open; "KEEP_CLOSE" stays closed. */
+    val lidMode: String? = null,
+    /** SLOW, MEDIUM or FAST. */
+    val lidSpeed: String? = null,
+    val lidCloseSec: Int? = null,
+    val desiccantEveryDays: Int? = null,
+    val displayText: String? = null,
+    /** 5 heart, 6 dog, 7 cat, 8 elk. */
+    val displayIcon: Int? = null,
+) {
+    fun toJson(): JSONObject {
+        val o = JSONObject()
+        fun set(k: String, v: Any?) { o.put(k, v ?: JSONObject.NULL) }
+        set("planOn", planOn); set("childLock", childLock); set("lightOn", lightOn); set("soundOn", soundOn)
+        set("volume", volume); set("displayOn", displayOn); set("lidMode", lidMode); set("lidSpeed", lidSpeed)
+        set("lidCloseSec", lidCloseSec); set("desiccantEveryDays", desiccantEveryDays)
+        set("displayText", displayText); set("displayIcon", displayIcon)
+        return o
+    }
+
+    companion object {
+        fun fromJson(o: JSONObject): FeederConfig {
+            fun b(k: String) = if (o.isNull(k)) null else o.optBoolean(k)
+            fun i(k: String) = if (o.isNull(k)) null else o.optInt(k)
+            fun t(k: String) = if (o.isNull(k)) null else o.optString(k)
+            return FeederConfig(
+                b("planOn"), b("childLock"), b("lightOn"), b("soundOn"), i("volume"), b("displayOn"),
+                t("lidMode"), t("lidSpeed"), i("lidCloseSec"), i("desiccantEveryDays"), t("displayText"), i("displayIcon"),
+            )
+        }
+    }
+}
+
 /** Today's feeder numbers, for [day] (ISO date); -1 where Petlibro didn't say. */
 data class TodayStats(val day: String, val eatingTimes: Int, val feedingTimes: Int, val feedingPortions: Int, val eatingSeconds: Int = -1) {
     val isToday: Boolean get() = day == java.time.LocalDate.now().toString()
@@ -107,6 +149,23 @@ data class TodayStats(val day: String, val eatingTimes: Int, val feedingTimes: I
         }
         return if (time != null) "$times · $time" else times
     }
+}
+
+/** One change to the feeder's settings. */
+sealed interface Setting {
+    data class Plan(val on: Boolean) : Setting
+    data class ChildLock(val on: Boolean) : Setting
+    data class Light(val on: Boolean) : Setting
+    data class Sound(val on: Boolean) : Setting
+    data class Volume(val percent: Int) : Setting
+    data class Display(val on: Boolean) : Setting
+    /** Only the non-null parts change. */
+    data class Lid(val mode: String? = null, val speed: String? = null, val closeSec: Int? = null) : Setting
+    data class DesiccantEvery(val days: Int) : Setting
+    data object DesiccantReset : Setting
+    data object OpenLid : Setting
+    data class DisplayText(val text: String) : Setting
+    data class DisplayIcon(val id: Int) : Setting
 }
 
 /** Petlibro's US cloud API: the same calls its Android app makes. */
@@ -212,6 +271,75 @@ object Petlibro {
             hardware = str(base, "hardwareVersion") ?: str(real, "hardwareVersion"),
             mac = str(any("mac"), "mac"),
         )
+    }
+
+    /** The feeder's settings, from its live info, its settings and its display. */
+    fun config(token: String, serial: String): FeederConfig {
+        val body = { JSONObject().put("id", serial).put("deviceSn", serial) }
+        val real = request("/device/device/realInfo", body(), token) as? JSONObject ?: JSONObject()
+        val attr = runCatching { request("/device/setting/getAttributeSetting", body(), token) as? JSONObject }.getOrNull() ?: JSONObject()
+        val matrix = runCatching { request("/device/device/getDefaultMatrix", body(), token) as? JSONObject }.getOrNull() ?: JSONObject()
+        // The feeding plan switch is in the device's base info, not its live info.
+        val base = runCatching { request("/device/device/baseInfo", body(), token) as? JSONObject }.getOrNull() ?: JSONObject()
+        fun bool(o: JSONObject, k: String) = if (o.has(k) && !o.isNull(k)) o.optBoolean(k) else null
+        fun int(o: JSONObject, k: String) = if (o.has(k) && !o.isNull(k)) o.optDouble(k).takeIf { !it.isNaN() }?.toInt() else null
+        fun str(o: JSONObject, k: String) = o.optString(k).takeIf { it.isNotBlank() && it != "null" }
+        return FeederConfig(
+            planOn = bool(real, "enableFeedingPlan") ?: bool(base, "enableFeedingPlan"),
+            childLock = bool(real, "childLockSwitch"),
+            lightOn = bool(real, "lightSwitch"),
+            soundOn = bool(real, "soundSwitch"),
+            volume = int(attr, "volume"),
+            displayOn = bool(real, "screenDisplaySwitch"),
+            lidMode = str(attr, "coverOpenMode"),
+            lidSpeed = str(attr, "coverCloseSpeed") ?: str(real, "coverCloseSpeed"),
+            lidCloseSec = int(attr, "closeDoorTimeSec") ?: int(real, "closeDoorTimeSec"),
+            desiccantEveryDays = int(real, "changeDesiccantFrequency"),
+            displayText = str(matrix, "screenLetter"),
+            displayIcon = int(matrix, "screenDisplayId"),
+        )
+    }
+
+    /** Changes one setting; the calls and bodies are the Petlibro app's (via the Home Assistant integration). */
+    fun set(token: String, serial: String, change: Setting) {
+        val o = JSONObject().put("deviceSn", serial)
+        val path = when (change) {
+            is Setting.Plan -> { o.put("enable", change.on); "/device/setting/updateFeedingPlanSwitch" }
+            is Setting.ChildLock -> { o.put("enable", change.on); "/device/setting/updateChildLockSwitch" }
+            is Setting.Light -> { o.put("enable", change.on); "/device/setting/updateLightSwitch" }
+            is Setting.Sound -> { o.put("enable", change.on); "/device/setting/updateSoundSwitch" }
+            is Setting.Volume -> { o.put("volume", change.percent); "/device/setting/updateVolumeSetting" }
+            is Setting.Display -> {
+                o.put("screenDisplayAgingType", 1).put("screenDisplayStartTime", JSONObject.NULL)
+                    .put("screenDisplayEndTime", JSONObject.NULL).put("screenDisplaySwitch", change.on)
+                "/device/setting/updateDisplayMatrixSetting"
+            }
+            is Setting.Lid -> {
+                o.put("coverOpenMode", change.mode ?: JSONObject.NULL)
+                    .put("coverCloseSpeed", change.speed ?: JSONObject.NULL)
+                    .put("closeDoorTimeSec", change.closeSec ?: JSONObject.NULL)
+                "/device/setting/updateCoverSetting"
+            }
+            is Setting.DesiccantEvery -> {
+                o.put("key", "DESSICANT").put("frequency", change.days)
+                    .put("requestId", UUID.randomUUID().toString().replace("-", "")).put("timeout", 5000)
+                "/device/device/maintenanceFrequencySetting"
+            }
+            Setting.DesiccantReset -> {
+                o.put("requestId", UUID.randomUUID().toString().replace("-", "")).put("timeout", 5000)
+                "/device/device/desiccantReset"
+            }
+            Setting.OpenLid -> { o.put("barnDoorState", true).put("timeout", 8000); "/device/device/doorStateChange" }
+            is Setting.DisplayText -> {
+                o.put("screenDisplayId", JSONObject.NULL).put("screenDisplayMatrix", JSONObject.NULL).put("screenLetter", change.text)
+                "/device/device/displayMatrix"
+            }
+            is Setting.DisplayIcon -> {
+                o.put("screenDisplayId", change.id).put("screenDisplayMatrix", JSONObject.NULL).put("screenLetter", JSONObject.NULL)
+                "/device/device/displayMatrix"
+            }
+        }
+        request(path, o, token)
     }
 
     fun feed(token: String, serial: String, portions: Int, requestId: String = UUID.randomUUID().toString()) {
@@ -322,6 +450,12 @@ object Session {
 
     fun details(context: Context, serial: String): FeederDetails? =
         prefs(context).getString("details_$serial", null)?.let { runCatching { FeederDetails.fromJson(JSONObject(it)) }.getOrNull() }
+
+    fun saveConfig(context: Context, serial: String, c: FeederConfig) =
+        prefs(context).edit().putString("config_$serial", c.toJson().toString()).apply()
+
+    fun config(context: Context, serial: String): FeederConfig? =
+        prefs(context).getString("config_$serial", null)?.let { runCatching { FeederConfig.fromJson(JSONObject(it)) }.getOrNull() }
 
     fun savePets(context: Context, names: List<String>) = prefs(context).edit().putString("pets", JSONArray(names).toString()).apply()
 
