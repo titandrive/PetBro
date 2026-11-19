@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.sp
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
@@ -394,7 +395,8 @@ fun PortionStepper(portions: Int, label: String = "Portions", onChange: (Int) ->
 @Composable
 fun RepeatButton(icon: ImageVector, description: String, enabled: Boolean, onStep: () -> Unit) {
     val step by rememberUpdatedState(onStep)
-    val scope = rememberCoroutineScope()
+    // Stops a held repeat at the end of the range (1 or 48).
+    val stillEnabled by rememberUpdatedState(enabled)
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val alpha = if (enabled) 1f else 0.38f
@@ -408,17 +410,28 @@ fun RepeatButton(icon: ImageVector, description: String, enabled: Boolean, onSte
             .pointerInput(enabled) {
                 if (!enabled) return@pointerInput
                 detectTapGestures(onPress = {
+                    // A tick for the tap's step, like toggles; held repeats tick lighter below.
+                    Haptics.tick(context)
                     step()
-                    val repeat = scope.launch {
-                        delay(400)
-                        while (true) {
-                            if (Prefs.haptics(context)) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            step()
-                            delay(70)
+                    // The repeat lives inside this press, so it ends with it even when the press
+                    // is cancelled rather than released (the input restarting as the value
+                    // changes, say). Launched from the screen's scope it outlived the press and
+                    // kept stepping and buzzing forever.
+                    coroutineScope {
+                        val repeat = launch {
+                            delay(400)
+                            while (stillEnabled) {
+                                if (Prefs.haptics(context)) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                step()
+                                delay(70)
+                            }
+                        }
+                        try {
+                            tryAwaitRelease()
+                        } finally {
+                            repeat.cancel()
                         }
                     }
-                    tryAwaitRelease()
-                    repeat.cancel()
                 })
             },
     ) {

@@ -583,21 +583,26 @@ private fun ScheduleScreen() {
                 }
                 Meals.setEnabled(context, enable)
             }
-            Reveal(on) {
+            val next = Meals.nextDue(meals)
+            val signedOut = account is AccountState.SignedOut
+            val exactOff = !exactOk && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+            // With one meal its own card says when it's next, so the summary only shows for two
+            // or more (or when nothing's coming up). Nothing to show, nothing taking up room.
+            val summary = next == null || meals.count { it.enabled } > 1
+            Reveal(on && (signedOut || !backgroundOk || exactOff || summary)) {
                 GapColumn(12.dp, modifier = Modifier.padding(top = 4.dp)) {
-                    if (account is AccountState.SignedOut) {
+                    if (signedOut) {
                         Notice("Sign in on the Feeder tab, or meals can't go out", MaterialTheme.colorScheme.error)
                     }
                     if (!backgroundOk) {
                         Notice("Battery optimization can hold meals back", MaterialTheme.colorScheme.error, "Fix") { askingBattery = true }
                     }
-                    if (!exactOk && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    if (exactOff) {
                         Notice("Alarms & reminders is off, so meals may be late", MaterialTheme.colorScheme.error, "Fix") {
                             context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))
                         }
                     }
-                    val next = Meals.nextDue(meals)
-                    Text(
+                    if (summary) Text(
                         if (next == null) "No meals coming up"
                         else "Next: ${next.second.joinToString { it.name }} at ${whenLabel(next.first)}",
                         style = MaterialTheme.typography.bodySmall,
