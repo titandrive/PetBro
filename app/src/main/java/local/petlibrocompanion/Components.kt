@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -634,6 +635,7 @@ fun ThemePicker(family: ThemeFamily, onPick: (ThemeFamily) -> Unit) {
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ) {
+            Column(Modifier.themeScanlines()) {
             Text(
                 "Choose a theme",
                 style = MaterialTheme.typography.titleMedium,
@@ -659,6 +661,7 @@ fun ThemePicker(family: ThemeFamily, onPick: (ThemeFamily) -> Unit) {
                         repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
+            }
             }
         }
     }
@@ -804,7 +807,7 @@ fun TimeDialog(title: String, hour: Int, minute: Int, onDismiss: () -> Unit, onS
             color = MaterialTheme.colorScheme.surfaceContainer,
             modifier = Modifier.padding(horizontal = 16.dp).widthIn(max = 420.dp),
         ) {
-            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.themeScanlines().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     title,
                     style = MaterialTheme.typography.titleLarge,
@@ -980,3 +983,33 @@ private fun ClockDial(
         }
     }
 }
+
+
+/**
+ * Nuked's CRT scanlines in dark, as in Paid to Poop: a 1dp line in every 3dp over everything
+ * drawn, and over the whole screen a [vignette] darkening toward the edges.
+ */
+fun Modifier.scanlines(vignette: Boolean = false) = drawWithContent {
+    drawContent()
+    val pitch = 3.dp.toPx()
+    val line = 1.dp.toPx()
+    val color = Color.Black.copy(alpha = 0.28f)
+    var y = 0f
+    while (y < size.height) {
+        drawRect(color, topLeft = androidx.compose.ui.geometry.Offset(0f, y), size = androidx.compose.ui.geometry.Size(size.width, line))
+        y += pitch
+    }
+    if (vignette) {
+        drawRect(
+            brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.3f)),
+                center = androidx.compose.ui.geometry.Offset(size.width / 2, size.height / 2),
+                radius = maxOf(size.width, size.height) * 0.8f,
+            ),
+        )
+    }
+}
+
+/** [scanlines] when the theme calls for them. */
+@Composable
+fun Modifier.themeScanlines(vignette: Boolean = false): Modifier = if (LocalPalette.current.scanlines) scanlines(vignette) else this

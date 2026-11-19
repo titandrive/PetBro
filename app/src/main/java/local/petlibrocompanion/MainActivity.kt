@@ -157,7 +157,7 @@ private fun App() {
         }
     }
 
-    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize().clearFocusOnTap()) {
+    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize().themeScanlines(vignette = true).clearFocusOnTap()) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             bottomBar = {
@@ -327,7 +327,7 @@ private fun FeedSheet(onDismiss: () -> Unit) {
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
     ) {
-        GapColumn(12.dp, modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp).navigationBarsPadding()) {
+        GapColumn(12.dp, modifier = Modifier.themeScanlines().padding(horizontal = 20.dp).padding(bottom = 24.dp).navigationBarsPadding()) {
             Column {
                 Text("Feed now", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 Text(

@@ -199,6 +199,8 @@ class FeedWidget : AppWidgetProvider() {
                         views.setInt(R.id.widget_divider, "setBackgroundColor", (accent and 0xFFFFFF) or (0x40 shl 24))
                     }
                 }
+                // Nuked's scanlines in dark, over the widget when it has a background.
+                views.setViewVisibility(R.id.widget_scanlines, if (palette.scanlines && look.opacity > 0) View.VISIBLE else View.GONE)
                 // The background in the theme's color at the set opacity, keeping its rounded corners.
                 val color = (background and 0xFFFFFF) or ((look.opacity.coerceIn(0, 100) * 255 / 100) shl 24)
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
@@ -353,6 +355,7 @@ class FeedWidgetConfigure : ComponentActivity() {
             AppTheme(paletteFor(family, mode, amoled, ultra)) {
                 Scaffold(
                     containerColor = MaterialTheme.colorScheme.background,
+                    modifier = Modifier.themeScanlines(),
                     topBar = { Header("Widget", modeToggle = false) },
                     bottomBar = {
                         Button(
